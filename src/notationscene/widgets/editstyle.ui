@@ -4894,7 +4894,7 @@
                <string>Barlines</string>
               </property>
               <layout class="QGridLayout" name="gridLayout_42">
-               <item row="9" column="0">
+               <item row="10" column="0">
                 <widget class="QLabel" name="label_86">
                  <property name="text">
                   <string>Double barline distance:</string>
@@ -4904,7 +4904,7 @@
                  </property>
                 </widget>
                </item>
-               <item row="9" column="1">
+               <item row="10" column="1">
                 <widget class="QDoubleSpinBox" name="doubleBarDistance">
                  <property name="keyboardTracking">
                   <bool>false</bool>
@@ -4930,7 +4930,7 @@
                  </property>
                 </widget>
                </item>
-               <item row="6" column="2">
+               <item row="7" column="2">
                 <widget class="QToolButton" name="resetEndBarWidth">
                  <property name="toolTip">
                   <string>Reset to default</string>
@@ -4943,7 +4943,7 @@
                  </property>
                 </widget>
                </item>
-               <item row="7" column="1">
+               <item row="8" column="1">
                 <widget class="QDoubleSpinBox" name="endBarDistance">
                  <property name="keyboardTracking">
                   <bool>false</bool>
@@ -4956,7 +4956,7 @@
                  </property>
                 </widget>
                </item>
-               <item row="6" column="1">
+               <item row="7" column="1">
                 <widget class="QDoubleSpinBox" name="endBarWidth">
                  <property name="keyboardTracking">
                   <bool>false</bool>
@@ -4976,7 +4976,7 @@
                  </property>
                 </widget>
                </item>
-               <item row="13" column="2">
+               <item row="14" column="2">
                 <widget class="QToolButton" name="resetRepeatBarlineDotSeparation">
                  <property name="toolTip">
                   <string>Reset to default</string>
@@ -5002,7 +5002,7 @@
                  </property>
                 </widget>
                </item>
-               <item row="5" column="2">
+               <item row="6" column="2">
                 <widget class="QToolButton" name="resetBarWidth">
                  <property name="toolTip">
                   <string>Reset to default</string>
@@ -5025,7 +5025,7 @@
                  </property>
                 </widget>
                </item>
-               <item row="8" column="1">
+               <item row="9" column="1">
                 <widget class="QDoubleSpinBox" name="doubleBarWidth">
                  <property name="keyboardTracking">
                   <bool>false</bool>
@@ -5038,7 +5038,7 @@
                  </property>
                 </widget>
                </item>
-               <item row="6" column="0">
+               <item row="7" column="0">
                 <widget class="QLabel" name="label_83">
                  <property name="text">
                   <string>Thick barline thickness:</string>
@@ -5061,7 +5061,7 @@
                  </property>
                 </spacer>
                </item>
-               <item row="9" column="2">
+               <item row="10" column="2">
                 <widget class="QToolButton" name="resetDoubleBarDistance">
                  <property name="toolTip">
                   <string>Reset to default</string>
@@ -5074,7 +5074,7 @@
                  </property>
                 </widget>
                </item>
-               <item row="7" column="2">
+               <item row="8" column="2">
                 <widget class="QToolButton" name="resetEndBarDistance">
                  <property name="toolTip">
                   <string>Reset to default</string>
@@ -5087,7 +5087,7 @@
                  </property>
                 </widget>
                </item>
-               <item row="7" column="0">
+               <item row="8" column="0">
                 <widget class="QLabel" name="label_84">
                  <property name="text">
                   <string>Thick barline distance:</string>
@@ -5097,7 +5097,7 @@
                  </property>
                 </widget>
                </item>
-               <item row="13" column="0">
+               <item row="14" column="0">
                 <widget class="QLabel" name="repeatBarlineDotSeparationLbl">
                  <property name="text">
                   <string>Repeat barline to dots distance:</string>
@@ -5107,7 +5107,7 @@
                  </property>
                 </widget>
                </item>
-               <item row="5" column="0">
+               <item row="6" column="0">
                 <widget class="QLabel" name="label_82">
                  <property name="text">
                   <string>Thin barline thickness:</string>
@@ -5124,7 +5124,7 @@
                  </property>
                 </widget>
                </item>
-               <item row="8" column="2">
+               <item row="9" column="2">
                 <widget class="QToolButton" name="resetDoubleBarWidth">
                  <property name="toolTip">
                   <string>Reset to default</string>
@@ -5150,7 +5150,7 @@
                  </property>
                 </widget>
                </item>
-               <item row="13" column="1">
+               <item row="14" column="1">
                 <widget class="QDoubleSpinBox" name="repeatBarlineDotSeparation">
                  <property name="keyboardTracking">
                   <bool>false</bool>
@@ -5170,7 +5170,7 @@
                  </property>
                 </widget>
                </item>
-               <item row="5" column="1">
+               <item row="6" column="1">
                 <widget class="QDoubleSpinBox" name="barWidth">
                  <property name="keyboardTracking">
                   <bool>false</bool>
@@ -5183,7 +5183,7 @@
                  </property>
                 </widget>
                </item>
-               <item row="8" column="0">
+               <item row="9" column="0">
                 <widget class="QLabel" name="label_85">
                  <property name="text">
                   <string>Double barline thickness:</string>
@@ -5206,7 +5206,7 @@
                  </property>
                 </widget>
                </item>
-               <item row="4" column="0">
+               <item row="5" column="0">
                 <widget class="QCheckBox" name="maskBarlines">
                  <property name="accessibleName">
                   <string>Mask barlines</string>
@@ -5216,14 +5216,14 @@
                  </property>
                 </widget>
                </item>
-               <item row="4" column="2">
+               <item row="5" column="2">
                 <widget class="QToolButton" name="resetMaskBarlines">
                  <property name="text">
                   <string notr="true"/>
                  </property>
                 </widget>
                </item>
-               <item row="10" column="0">
+               <item row="11" column="0">
                 <widget class="QLabel" name="label_226">
                  <property name="text">
                   <string>Dashed barline thickness:</string>
@@ -5233,7 +5233,7 @@
                  </property>
                 </widget>
                </item>
-               <item row="10" column="1">
+               <item row="11" column="1">
                 <widget class="QDoubleSpinBox" name="dashBarWidth">
                  <property name="keyboardTracking">
                   <bool>false</bool>
@@ -5246,7 +5246,7 @@
                  </property>
                 </widget>
                </item>
-               <item row="10" column="2">
+               <item row="11" column="2">
                 <widget class="QToolButton" name="resetDashBarWidth">
                  <property name="toolTip">
                   <string>Reset to default</string>
@@ -5259,7 +5259,7 @@
                  </property>
                 </widget>
                </item>
-               <item row="11" column="0">
+               <item row="12" column="0">
                 <widget class="QLabel" name="label_227">
                  <property name="text">
                   <string>Dashed barline dash length:</string>
@@ -5269,7 +5269,7 @@
                  </property>
                 </widget>
                </item>
-               <item row="11" column="1">
+               <item row="12" column="1">
                 <widget class="QDoubleSpinBox" name="dashBarDash">
                  <property name="keyboardTracking">
                   <bool>false</bool>
@@ -5282,7 +5282,7 @@
                  </property>
                 </widget>
                </item>
-               <item row="11" column="2">
+               <item row="12" column="2">
                 <widget class="QToolButton" name="resetDashBarDash">
                  <property name="toolTip">
                   <string>Reset to default</string>
@@ -5295,7 +5295,7 @@
                  </property>
                 </widget>
                </item>
-               <item row="12" column="0">
+               <item row="13" column="0">
                 <widget class="QLabel" name="label_228">
                  <property name="text">
                   <string>Dashed barline gap length:</string>
@@ -5305,7 +5305,7 @@
                  </property>
                 </widget>
                </item>
-               <item row="12" column="1">
+               <item row="13" column="1">
                 <widget class="QDoubleSpinBox" name="dashBarGap">
                  <property name="keyboardTracking">
                   <bool>false</bool>
@@ -5318,13 +5318,36 @@
                  </property>
                 </widget>
                </item>
-               <item row="12" column="2">
+               <item row="13" column="2">
                 <widget class="QToolButton" name="resetDashBarGap">
                  <property name="toolTip">
                   <string>Reset to default</string>
                  </property>
                  <property name="accessibleName">
                   <string>Reset 'Dashed barline gap length' value</string>
+                 </property>
+                 <property name="text">
+                  <string notr="true"/>
+                 </property>
+                </widget>
+               </item>
+               <item row="4" column="0" colspan="2">
+                <widget class="QCheckBox" name="autoAdjustBarlineGaps">
+                 <property name="accessibleName">
+                  <string>Automatically adjust gaps between dashes and dots to fit staves</string>
+                 </property>
+                 <property name="text">
+                  <string>Automatically adjust gaps between dashes and dots to fit staves</string>
+                 </property>
+                </widget>
+               </item>
+               <item row="4" column="2">
+                <widget class="QToolButton" name="resetAutoAdjustBarlineGaps">
+                 <property name="toolTip">
+                  <string>Reset to default</string>
+                 </property>
+                 <property name="accessibleName">
+                  <string>Reset 'Automatically adjust gaps between dashes and dots to fit staves' value</string>
                  </property>
                  <property name="text">
                   <string notr="true"/>
@@ -13802,6 +13825,8 @@ followed by dashes</string>
   <tabstop>resetShowStartBarlineMultiple</tabstop>
   <tabstop>scaleBarlines</tabstop>
   <tabstop>resetScaleBarlines</tabstop>
+  <tabstop>autoAdjustBarlineGaps</tabstop>
+  <tabstop>resetAutoAdjustBarlineGaps</tabstop>
   <tabstop>maskBarlines</tabstop>
   <tabstop>resetMaskBarlines</tabstop>
   <tabstop>barWidth</tabstop>
