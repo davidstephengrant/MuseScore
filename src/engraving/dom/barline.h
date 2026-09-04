@@ -170,6 +170,8 @@ public:
         // Top of the staff below, which y2 overshoots slightly so the abutting strokes leave no seam.
         // Equal to y2 when the barline does not span.
         double y2StaffBelow = 0.0;
+        // Set only while a grip is dragged; the fit is then held still and the drawing clipped at y2
+        bool isDragging = false;
     };
 
     DECLARE_LAYOUTDATA_METHODS(BarLine)

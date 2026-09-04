@@ -818,8 +818,12 @@ static void drawPatternedBarLine(const BarLine* item, Painter* painter, const re
 {
     const double x = lw * .5;
 
-    // A barline can be shorter than the staff it belongs to, hence the clamp
-    const double yStaffBottom = std::min(y2Staff, y2);
+    // While a grip is dragged, y2 follows the pointer but the staves either side do not move. Hold
+    // the fit at that settled geometry and clip at y2; refitting per move would slide the dashes.
+    const bool dragging = item->ldata()->isDragging;
+
+    // A barline can also be shorter than its own staff without being dragged, hence the clamp
+    const double yStaffBottom = dragging ? y2Staff : std::min(y2Staff, y2);
     const bool spansBelow = y2 > yStaffBottom;
 
     if (item->style().styleB(Sid::autoAdjustBarlineGaps)) {
@@ -829,18 +833,31 @@ static void drawPatternedBarLine(const BarLine* item, Painter* painter, const re
         drawFittedPattern(painter, x, y1, onStaff, y2);
 
         if (spansBelow) {
-            // Fitted to the space between the two staff lines alone; y2Staff and y2StaffBelow are their
-            // outer extremes, so the line thickness is already counted. Where a staff's own pattern is a
-            // single centred dash it strands empty space at the end of that staff, so the gap at that
-            // join comes out wider than the ones within the segment. Taking that space into account
-            // instead would even the joins up, but only by dragging every gap in the fit out with it.
-            //
-            // y2 can fall short of y2StaffBelow, when spanTo shortens the barline
-            const double clearance = std::min(nominalGap, STAFF_LINE_CLEARANCE * item->spatium());
-            const double minDash = std::min(nominalDash, MIN_DASH_LENGTH * item->spatium());
-            drawFittedPattern(painter, x, yStaffBottom,
-                              fitPatternBetweenStaves(std::min(y2StaffBelow, y2) - yStaffBottom, nominalDash,
-                                                      nominalGap, clearance, minDash), y2);
+            if (y2StaffBelow > yStaffBottom) {
+                // Outside a drag y2 can still fall short of y2StaffBelow, when spanTo shortens the barline
+                const double yBetweenEnd = dragging ? y2StaffBelow : std::min(y2StaffBelow, y2);
+
+                // Fitted to the space between the two staff lines alone; y2Staff and y2StaffBelow are their
+                // outer extremes, so the line thickness is already counted. Where a staff's own pattern is a
+                // single centred dash it strands empty space at the end of that staff, so the gap at that
+                // join comes out wider than the ones within the segment. Taking that space into account
+                // instead would even the joins up, but only by dragging every gap in the fit out with it.
+                const double clearance = std::min(nominalGap, STAFF_LINE_CLEARANCE * item->spatium());
+                const double minDash = std::min(nominalDash, MIN_DASH_LENGTH * item->spatium());
+                drawFittedPattern(painter, x, yStaffBottom,
+                                  fitPatternBetweenStaves(yBetweenEnd - yStaffBottom, nominalDash, nominalGap,
+                                                          clearance, minDash), y2);
+            } else if (dragging) {
+                // Not yet reaching the staff below, so there is no settled space to fit. Carry the staff's
+                // own dash and gap on to the pointer from where its last dash ended, which a centred single
+                // dash leaves a pad short of the staff. Such a dash has no gap of its own to carry.
+                const double yFrom = yStaffBottom - onStaff.offset;
+                const double dash = onStaff.count > 0 ? onStaff.dash : nominalDash;
+                const double gap = onStaff.count > 1 ? onStaff.gap : nominalGap;
+                const double period = dash + gap;
+                const int count = period > 0.0 ? static_cast<int>(std::ceil((y2 - yFrom) / period)) : 0;
+                drawFittedPattern(painter, x, yFrom, { std::max(0, count), dash, gap, gap }, y2);
+            }
         }
         return;
     }
