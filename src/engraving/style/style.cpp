@@ -348,6 +348,8 @@ void MStyle::applyCompatStyleVals(int mscVersion)
         set(Sid::maskTies, false);
 
         set(Sid::dashBarWidth, value(Sid::barWidth));
+
+        set(Sid::autoAdjustBarlineGaps, false);
     }
 
     if (mscVersion < 470) {
