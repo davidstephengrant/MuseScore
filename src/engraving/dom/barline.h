@@ -165,6 +165,8 @@ public:
     struct LayoutData : public EngravingItem::LayoutData {
         double y1 = 0.0;
         double y2 = 0.0;
+        // Bottom of the origin staff; equal to y2 unless the barline spans to the staff below
+        double y2Staff = 0.0;
     };
 
     DECLARE_LAYOUTDATA_METHODS(BarLine)
