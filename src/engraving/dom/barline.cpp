@@ -235,6 +235,7 @@ void BarLine::calcY()
         // for use in palette
         data->y1 = m_spanFrom * _spatium * .5;
         data->y2 = (8 - m_spanTo) * _spatium * .5;
+        data->y2Staff = data->y2;
         return;
     }
     staff_idx_t staffIdx1 = staffIdx();
@@ -256,9 +257,12 @@ void BarLine::calcY()
 
     int from = m_spanFrom;
     int to = m_spanTo;
+    // spanTo refers to the staff the barline ends on, so where it spans, the origin staff ends at its own bottom line
+    int toOriginStaff = spanStaff ? 0 : m_spanTo;
 
     if (oneLine && m_spanFrom == 0 && m_spanTo == 0) {
         from = BARLINE_SPAN_1LINESTAFF_FROM;
+        toOriginStaff = BARLINE_SPAN_1LINESTAFF_TO;
         if (!spanStaff) {
             to = BARLINE_SPAN_1LINESTAFF_TO;
         }
@@ -270,7 +274,8 @@ void BarLine::calcY()
     double lineWidth = style().styleS(Sid::staffLineWidth).val() * spatium1 * .5;
 
     double y1 = offset + from * lineDistance * .5 - lineWidth;
-    double y2 = offset + (staffType1->lines() * 2 - 2 + to) * lineDistance * .5 + lineWidth;
+    double y2Staff = offset + (staffType1->lines() * 2 - 2 + toOriginStaff) * lineDistance * .5 + lineWidth;
+    double y2 = y2Staff;
 
     if (spanStaff) {
         // we need spatium and line distance of bottom staff
@@ -287,7 +292,8 @@ void BarLine::calcY()
         if (staffType2->lines() <= 1) {
             y2 += BARLINE_SPAN_1LINESTAFF_FROM * lineDistance2 * 0.5;
         }
-    }
+
+   }
 
     // if stafftype change in next measure, check new staff positions
     Fraction tickNext = tick + measure->ticks();
@@ -299,13 +305,11 @@ void BarLine::calcY()
         if (systemNext && systemNext == system && staffType1Next != staffType1) {
             if (oneLine && !oneLineNext) {
                 from = m_spanFrom;
-                to = m_spanTo;
+                toOriginStaff = spanStaff ? 0 : m_spanTo;
             }
             if (oneLineNext && m_spanFrom == 0 && m_spanTo == 0) {
                 from = BARLINE_SPAN_1LINESTAFF_FROM;
-                if (!spanStaff) {
-                    to = BARLINE_SPAN_1LINESTAFF_TO;
-                }
+                toOriginStaff = BARLINE_SPAN_1LINESTAFF_TO;
             }
             double spatium1Next = staffType1Next->spatium();
             double lineDistanceNext = staffType1Next->lineDistance().val() * spatium1Next;
@@ -320,10 +324,11 @@ void BarLine::calcY()
                     y1 = y1Next;
                 }
 
-                if (!spanStaff) {
-                    double y2Next = offsetNext + (staffType1Next->lines() * 2 - 2 + to) * lineDistanceNext * .5 + lineWidthNext;
-                    if (y2Next > y2) {
-                        y2 = y2Next;
+                double y2StaffNext = offsetNext + (staffType1Next->lines() * 2 - 2 + toOriginStaff) * lineDistanceNext * .5 + lineWidthNext;
+                if (y2StaffNext > y2Staff) {
+                    y2Staff = y2StaffNext;
+                    if (!spanStaff) {
+                        y2 = y2Staff;
                     }
                 }
             }
@@ -332,6 +337,7 @@ void BarLine::calcY()
 
     data->y1 = y1;
     data->y2 = y2;
+    data->y2Staff = y2Staff;
 }
 
 //---------------------------------------------------------
