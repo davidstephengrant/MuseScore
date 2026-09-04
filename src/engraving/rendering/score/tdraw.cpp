@@ -750,6 +750,53 @@ static FittedPattern fitPatternToStaff(double length, double nominalDash, double
     return { count, nominalDash, (length - count * nominalDash) / (count - 1), 0.0 };
 }
 
+// Dashes between two staves keep this much clear of the staff lines above and below, in staff
+// spaces, or the nominal gap where that is narrower
+static constexpr double STAFF_LINE_CLEARANCE = 0.15;
+
+// The shortest a dash between two staves may be contracted to, in staff spaces - or its nominal
+// length, where that is already shorter. Below this the space is left empty instead.
+static constexpr double MIN_DASH_LENGTH = 0.25;
+
+// Fits a whole number of dashes (or dots) into `length` so that it starts and ends with a gap of
+// at least `minGap`, i.e. `length == count * dash + (count + 1) * gap`. Where not even one nominal
+// dash fits, a single dash contracts to what the two gaps leave, down to `minDash`; shorter than
+// that the space is left empty.
+static FittedPattern fitPatternBetweenStaves(double length, double nominalDash, double nominalGap, double minGap,
+                                             double minDash)
+{
+    const double nominalPeriod = nominalDash + nominalGap;
+    if (length <= 0.0 || nominalDash <= 0.0 || nominalPeriod <= 0.0) {
+        return FittedPattern();
+    }
+
+    // Largest count whose gaps all stay at or above minGap
+    const int maxCount = static_cast<int>(std::floor((length - minGap) / (nominalDash + minGap)));
+
+    int count = 1;
+    double dash = nominalDash;
+    double gap = 0.0;
+
+    if (maxCount > 0) {
+        // Closest to nominal gaps, but keep one dash wherever there is room, so no hole appears
+        count = std::clamp(static_cast<int>(std::lround((length - nominalGap) / nominalPeriod)), 1, maxCount);
+        gap = (length - count * nominalDash) / (count + 1);
+    } else {
+        // Between closely spaced staves a long dash leaves no room for itself, and a barline with a
+        // length of nothing drawn in it reads worse than one whose dash there is short. Reaching
+        // here means length is under nominalDash + 2 * minGap, so this is shorter than nominal.
+        dash = length - 2.0 * minGap;
+        if (dash < minDash) {
+            return FittedPattern();
+        }
+    }
+
+    // Both gaps are the same, so this is the gap in the fitted case and the clearance in the
+    // contracted one, and either way it centres what is drawn in the space between the staves
+    const double drawn = count * dash + (count - 1) * gap;
+    return { count, dash, gap, (length - drawn) * 0.5 };
+}
+
 // Draws a fitted pattern from `yStart`, stopping at `yClip` where a drag has shortened the barline
 static void drawFittedPattern(Painter* painter, double x, double yStart, const FittedPattern& pattern, double yClip)
 {
@@ -764,31 +811,36 @@ static void drawFittedPattern(Painter* painter, double x, double yStart, const F
 }
 
 // Draws a dashed or dotted barline between y1 and y2, where y2Staff is the bottom of the staff it
-// starts on. With Sid::autoAdjustBarlineGaps the pattern is fitted to that staff.
+// starts on and y2StaffBelow the top of the staff below. With the style, the two fit separately.
 static void drawPatternedBarLine(const BarLine* item, Painter* painter, const rendering::PaintOptions& opt,
                                  double lw, double nominalDash, double nominalGap,
-                                 double y1, double y2, double y2Staff)
+                                 double y1, double y2, double y2Staff, double y2StaffBelow)
 {
     const double x = lw * .5;
 
     // A barline can be shorter than the staff it belongs to, hence the clamp
     const double yStaffBottom = std::min(y2Staff, y2);
+    const bool spansBelow = y2 > yStaffBottom;
 
     if (item->style().styleB(Sid::autoAdjustBarlineGaps)) {
         const double minDashGap = std::min(nominalGap, MIN_DASH_GAP * item->spatium());
         const FittedPattern onStaff = fitPatternToStaff(yStaffBottom - y1, nominalDash, nominalGap, minDashGap);
         painter->setPen(Pen(item->curColor(opt), lw, PenStyle::SolidLine, PenCapStyle::FlatCap));
+        drawFittedPattern(painter, x, y1, onStaff, y2);
 
-        if (y2 > yStaffBottom) {
-            // Carry the staff's pattern on into the space between the staves. A pattern of a
-            // single dash is centred and so has no gap of its own to carry on with.
-            const double dash = onStaff.count > 0 ? onStaff.dash : nominalDash;
-            const double gap = onStaff.count > 1 ? onStaff.gap : nominalGap;
-            const double period = dash + gap;
-            const int count = period > 0.0 ? static_cast<int>(std::ceil((y2 - y1 - onStaff.offset) / period)) : 0;
-            drawFittedPattern(painter, x, y1, { std::max(0, count), dash, gap, onStaff.offset }, y2);
-        } else {
-            drawFittedPattern(painter, x, y1, onStaff, y2);
+        if (spansBelow) {
+            // Fitted to the space between the two staff lines alone; y2Staff and y2StaffBelow are their
+            // outer extremes, so the line thickness is already counted. Where a staff's own pattern is a
+            // single centred dash it strands empty space at the end of that staff, so the gap at that
+            // join comes out wider than the ones within the segment. Taking that space into account
+            // instead would even the joins up, but only by dragging every gap in the fit out with it.
+            //
+            // y2 can fall short of y2StaffBelow, when spanTo shortens the barline
+            const double clearance = std::min(nominalGap, STAFF_LINE_CLEARANCE * item->spatium());
+            const double minDash = std::min(nominalDash, MIN_DASH_LENGTH * item->spatium());
+            drawFittedPattern(painter, x, yStaffBottom,
+                              fitPatternBetweenStaves(std::min(y2StaffBelow, y2) - yStaffBottom, nominalDash,
+                                                      nominalGap, clearance, minDash), y2);
         }
         return;
     }
@@ -828,14 +880,14 @@ void TDraw::draw(const BarLine* item, Painter* painter, const PaintOptions& opt)
         drawPatternedBarLine(item, painter, opt, lw,
                              item->style().styleAbsolute(Sid::dashBarDash) * item->mag(),
                              item->style().styleAbsolute(Sid::dashBarGap) * item->mag(),
-                             data->y1, data->y2, data->y2Staff);
+                             data->y1, data->y2, data->y2Staff, data->y2StaffBelow);
     }
     break;
 
     case BarLineType::DOTTED: {
         // A dot is a square of the barline's thickness, twice that apart: PenStyle::DotLine's proportions
         double lw = item->style().styleAbsolute(Sid::barWidth) * item->mag();
-        drawPatternedBarLine(item, painter, opt, lw, lw, 2.0 * lw, data->y1, data->y2, data->y2Staff);
+        drawPatternedBarLine(item, painter, opt, lw, lw, 2.0 * lw, data->y1, data->y2, data->y2Staff, data->y2StaffBelow);
     }
     break;
 

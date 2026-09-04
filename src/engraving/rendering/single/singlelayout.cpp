@@ -612,6 +612,7 @@ void SingleLayout::layout(BarLine* item, const Context& ctx)
 
     // A barline on its own - palette or preview - has no staff below; zero would end above its start
     ldata->y2Staff = ldata->y2;
+    ldata->y2StaffBelow = ldata->y2;
 
     auto layoutWidth = [](BarLine* item, const Context& ctx) {
         const double dotWidth = item->symWidth(SymId::repeatDot);
