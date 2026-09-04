@@ -236,6 +236,7 @@ void BarLine::calcY()
         data->y1 = m_spanFrom * _spatium * .5;
         data->y2 = (8 - m_spanTo) * _spatium * .5;
         data->y2Staff = data->y2;
+        data->y2StaffBelow = data->y2;
         return;
     }
     staff_idx_t staffIdx1 = staffIdx();
@@ -276,6 +277,7 @@ void BarLine::calcY()
     double y1 = offset + from * lineDistance * .5 - lineWidth;
     double y2Staff = offset + (staffType1->lines() * 2 - 2 + toOriginStaff) * lineDistance * .5 + lineWidth;
     double y2 = y2Staff;
+    double y2StaffBelow = 0.0;   // only meaningful when spanning; see the assignment below
 
     if (spanStaff) {
         // we need spatium and line distance of bottom staff
@@ -284,6 +286,7 @@ void BarLine::calcY()
         const StaffType* staffType2 = staff2 ? staff2->staffType(tick) : staffType1;
         double spatium2 = staffType2->spatium();
         double lineDistance2 = staffType2->lineDistance().val() * spatium2;
+        double lineWidth2 = style().styleS(Sid::staffLineWidth).val() * spatium2 * .5;
         double startStaffY = system->staff(staffIdx1)->y();
 
         y2 = measure->staffLines(staffIdx2)->y1() - startStaffY - to * lineDistance2 * 0.5;
@@ -293,7 +296,27 @@ void BarLine::calcY()
             y2 += BARLINE_SPAN_1LINESTAFF_FROM * lineDistance2 * 0.5;
         }
 
-   }
+        // staffLines()->y1() is the centre of the top line of the staff below, so that staff begins half
+        // a line width above it. Unlike y2 this does not depend on spanTo; the drawing clamps to y2.
+        const double yTopLineCentre = measure->staffLines(staffIdx2)->y1() - startStaffY;
+        y2StaffBelow = yTopLineCentre - lineWidth2;
+
+        if (staffType2->lines() <= 1) {
+            y2StaffBelow += BARLINE_SPAN_1LINESTAFF_FROM * lineDistance2 * 0.5;
+        }
+
+        // That barline may start above its own top line; stop where it begins rather than run into it.
+        // Where it starts below, the space it leaves belongs to that staff, hence the min rather
+        // than an assignment.
+        const BarLine* blBelow = barLineBelow();
+        if (blBelow) {
+            int fromBelow = blBelow->spanFrom();
+            if (staffType2->lines() <= 1 && blBelow->spanFrom() == 0 && blBelow->spanTo() == 0) {
+                fromBelow = BARLINE_SPAN_1LINESTAFF_FROM;
+            }
+            y2StaffBelow = std::min(y2StaffBelow, yTopLineCentre + fromBelow * lineDistance2 * 0.5 - lineWidth2);
+        }
+    }
 
     // if stafftype change in next measure, check new staff positions
     Fraction tickNext = tick + measure->ticks();
@@ -338,6 +361,17 @@ void BarLine::calcY()
     data->y1 = y1;
     data->y2 = y2;
     data->y2Staff = y2Staff;
+    data->y2StaffBelow = spanStaff ? y2StaffBelow : y2;
+}
+
+const BarLine* BarLine::barLineBelow() const
+{
+    if (!m_spanStaff || !segment()) {
+        return nullptr;
+    }
+
+    const staff_idx_t idx = nextVisibleSpannedStaff(this);
+    return idx == staffIdx() ? nullptr : toBarLine(segment()->element(idx * VOICES));
 }
 
 //---------------------------------------------------------

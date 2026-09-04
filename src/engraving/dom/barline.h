@@ -167,11 +167,17 @@ public:
         double y2 = 0.0;
         // Bottom of the origin staff; equal to y2 unless the barline spans to the staff below
         double y2Staff = 0.0;
+        // Top of the staff below, which y2 overshoots slightly so the abutting strokes leave no seam.
+        // Equal to y2 when the barline does not span.
+        double y2StaffBelow = 0.0;
     };
 
     DECLARE_LAYOUTDATA_METHODS(BarLine)
 
 private:
+
+    // The barline on the staff this one spans to, or nullptr if it does not span
+    const BarLine* barLineBelow() const;
 
     friend class Factory;
     BarLine(Segment* parent);
