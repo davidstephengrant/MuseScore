@@ -117,6 +117,7 @@ public:
         bool markCorruptedMeasures = true;
         bool showGapRests = false;
         bool showOriginAndCombinedStaves = false;
+        bool colorBarlineSegments = false;
 
         bool anyEnabled() const
         {
@@ -132,6 +133,7 @@ public:
                    || markCorruptedMeasures
                    || showGapRests
                    || showOriginAndCombinedStaves
+                   || colorBarlineSegments
             ;
         }
     };

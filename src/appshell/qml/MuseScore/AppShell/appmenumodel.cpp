@@ -503,6 +503,7 @@ MenuItem* AppMenuModel::makeDiagnosticsMenu()
             makeMenuItem(COLOR_ELEMENT_SHAPES_COMMAND),
             makeMenuItem(SHOW_SEGMENT_SHAPES_COMMAND),
             makeMenuItem(COLOR_SEGMENT_SHAPES_COMMAND),
+            makeMenuItem(COLOR_BARLINE_SEGMENTS_COMMAND),
             makeMenuItem(SHOW_SKYLINES_COMMAND),
             makeMenuItem(SHOW_SYSTEM_BOUNDING_RECTS_COMMAND),
             makeMenuItem(SHOW_ELEMENT_MASKS_COMMAND),
