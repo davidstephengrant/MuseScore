@@ -25,6 +25,7 @@
 #include "iengravingcontextconfiguration.h" // IWYU pragma: keep
 
 //#include "accessibility/accessibleitem.h"
+#include "dom/barline.h"
 #include "dom/page.h"
 #include "dom/score.h"
 #include "dom/system.h"
@@ -42,6 +43,10 @@ using namespace mu::engraving;
 using namespace mu::engraving::rendering::score;
 
 static const Color DEBUG_ELTREE_SELECTED_COLOR(164, 0, 0);
+
+// Shade the staff segments alternately, so abutting ones read apart down a spanned barline
+static const Color BARLINE_STAFF_SEGMENT_COLORS[2] { Color(0, 90, 220, 90), Color(0, 185, 235, 90) };
+static const Color BARLINE_INTER_STAFF_SEGMENT_COLOR(220, 0, 0, 90);
 
 /// Generates a seemingly random but stable color based on a pointer address.
 /// If we would use really random colors, they would change on every redraw.
@@ -120,6 +125,34 @@ void DebugPaint::paintElementDebug(Painter& painter, const EngravingItem* item)
             for (const LineAttachPoint& lap : toNote(item)->lineAttachPoints()) {
                 PointF point = lap.pos();
                 painter.drawEllipse(RectF(point.x() - radius, point.y() - radius, 2 * radius, 2 * radius));
+            }
+        }
+
+        if (item->isBarLine() && item->configuration()->debuggingOptions().colorBarlineSegments) {
+            const BarLine* barLine = toBarLine(item);
+            const BarLine::LayoutData* data = barLine->ldata();
+
+            // Grow the bbox equally either side, so the band stays centred whatever the barline's
+            // thickness. The margin is in score spatium, not the staff's, so that a barline spanning
+            // staves of different sizes keeps one width down its whole length.
+            const double margin = 0.25 * item->style().spatium();
+            const double x = bbox.x() - margin;
+            const double width = bbox.width() + 2.0 * margin;
+
+            painter.setPen(PenStyle::NoPen);
+            painter.setBrush(BARLINE_STAFF_SEGMENT_COLORS[barLine->staffIdx() % 2]);
+
+            if (barLine->hasFittedInterStaffSegment()) {
+                painter.drawRect(RectF(x, data->y1, width, data->y2Staff - data->y1));
+
+                // spanTo can end the barline part way into the space between the staves
+                const double end = std::min(data->y2StaffBelow, data->y2);
+                painter.setBrush(BARLINE_INTER_STAFF_SEGMENT_COLOR);
+                painter.drawRect(RectF(x, data->y2Staff, width, end - data->y2Staff));
+            } else {
+                // Stop where the barline below begins, so this does not overlap the band drawn for it
+                const double end = std::min(data->y2, data->y2StaffBelow);
+                painter.drawRect(RectF(x, data->y1, width, end - data->y1));
             }
         }
 

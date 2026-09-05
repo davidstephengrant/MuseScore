@@ -575,5 +575,6 @@ inline static const muse::rcommand::Command MARK_EMPTY_STAFF_COMMAND("command://
 inline static const muse::rcommand::Command MARK_CORRUPTED_MEASURES_COMMAND("command://notation/diagnostic/mark-corrupted-measures");
 inline static const muse::rcommand::Command SHOW_GAP_RESTS_COMMAND("command://notation/diagnostic/show-gap-rests");
 inline static const muse::rcommand::Command SHOW_ORIGIN_AND_COMBINED_COMMAND("command://notation/diagnostic/show-origin-and-combined");
+inline static const muse::rcommand::Command COLOR_BARLINE_SEGMENTS_COMMAND("command://notation/diagnostic/color-barline-segments");
 inline static const muse::rcommand::Command CHECK_FOR_SCORE_CORRUPTIONS_COMMAND("command://notation/diagnostic/check-for-score-corruptions");
 }

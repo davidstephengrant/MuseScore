@@ -374,6 +374,21 @@ const BarLine* BarLine::barLineBelow() const
     return idx == staffIdx() ? nullptr : toBarLine(segment()->element(idx * VOICES));
 }
 
+bool BarLine::hasFittedInterStaffSegment() const
+{
+    if (!style().styleB(Sid::autoAdjustBarlineGaps)) {
+        return false;
+    }
+
+    // Only the patterned barlines are fitted; the rest are drawn as one continuous stroke
+    if (m_barLineType != BarLineType::BROKEN && m_barLineType != BarLineType::DOTTED) {
+        return false;
+    }
+
+    const LayoutData* data = ldata();
+    return data->y2 > data->y2Staff && data->y2StaffBelow > data->y2Staff;
+}
+
 //---------------------------------------------------------
 //   isTop
 //---------------------------------------------------------

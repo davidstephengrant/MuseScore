@@ -276,6 +276,7 @@ static const std::vector<Command> DEBUG_COMMANDS = {
     MARK_CORRUPTED_MEASURES_COMMAND,
     SHOW_GAP_RESTS_COMMAND,
     SHOW_ORIGIN_AND_COMBINED_COMMAND,
+    COLOR_BARLINE_SEGMENTS_COMMAND,
 };
 
 std::string NotationCommandsState::moduleName() const

@@ -128,6 +128,10 @@ public:
     bool isTop() const;
     bool isBottom() const;
 
+    // Whether the space between this staff and the one below is fitted as a segment of its own.
+    // Describes the settled geometry, so it does not follow a grip being dragged.
+    bool hasFittedInterStaffSegment() const;
+
     int subtype() const override { return int(m_barLineType); }
     TranslatableString subtypeUserName() const override;
 
