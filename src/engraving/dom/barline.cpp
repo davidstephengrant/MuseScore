@@ -640,6 +640,14 @@ void BarLine::endDragGrip(EditData& ed)
     System* syst   = segment()->measure()->system();
     double systTopY = syst->pagePos().y();
 
+    // Staff lines carry a staff type's vertical offset where the staff's own position does not,
+    // and calcY measures the barline to the lines, so the snap below has to as well.
+    const Measure* dragMeasure = segment()->measure();
+    auto staffTopY = [&](staff_idx_t idx) {
+        const StaffLines* lines = dragMeasure->staffLines(idx);
+        return systTopY + (lines ? lines->y1() : syst->staff(idx)->y());
+    };
+
     // determine new span value
     staff_idx_t staffIdx2;
     size_t numOfStaves = syst->staves().size();
@@ -648,13 +656,13 @@ void BarLine::endDragGrip(EditData& ed)
         staffIdx2 = staffIdx1;
     } else {
         // if there are other staves after it, look for staff nearest to bar line bottom coord
-        double staff1TopY = syst->staff(staffIdx1)->y() + systTopY;
+        double staff1TopY = staffTopY(staffIdx1);
 
         for (staffIdx2 = staffIdx1 + 1; staffIdx2 < numOfStaves; ++staffIdx2) {
             // compute 1st staff height, absolute top Y of 2nd staff and height of blank between the staves
             Staff* staff1      = score()->staff(staffIdx2 - 1);
             double staff1Hght    = staff1->staffHeight(tick());
-            double staff2TopY    = systTopY + syst->staff(staffIdx2)->y();
+            double staff2TopY    = staffTopY(staffIdx2);
             double blnkBtwnStaff = staff2TopY - staff1TopY - staff1Hght;
             // if bar line bottom coord is above than mid-way of blank between staves...
             if (ay2 < (staff1TopY + staff1Hght + blnkBtwnStaff * .5)) {
@@ -671,7 +679,7 @@ void BarLine::endDragGrip(EditData& ed)
     staff_idx_t breakSpanAt = muse::nidx;
     if (staffIdx1 == staffIdx2) {
         breakSpanAt = staffIdx1;
-    } else if (bed->yoff2 > 0.0 && ay2 >= systTopY + syst->staff(staffIdx2)->y()) {
+    } else if (bed->yoff2 > 0.0 && ay2 >= staffTopY(staffIdx2)) {
         breakSpanAt = staffIdx2;
     }
 
