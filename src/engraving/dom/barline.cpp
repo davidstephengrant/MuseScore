@@ -666,6 +666,15 @@ void BarLine::endDragGrip(EditData& ed)
         staffIdx2 -= 1;
     }
 
+    // Which staff, if any, stops spanning. The grip rests on the ending staff's top line, so only
+    // yoff2 tells a drag down into that staff from no drag at all.
+    staff_idx_t breakSpanAt = muse::nidx;
+    if (staffIdx1 == staffIdx2) {
+        breakSpanAt = staffIdx1;
+    } else if (bed->yoff2 > 0.0 && ay2 >= systTopY + syst->staff(staffIdx2)->y()) {
+        breakSpanAt = staffIdx2;
+    }
+
     // determine new spanFrom and spanTo values
     int newSpanFrom = 0;
     int newSpanTo = 0;
@@ -673,7 +682,6 @@ void BarLine::endDragGrip(EditData& ed)
     bool localDrag = ed.control() || segment()->isBarLineType() || spanStaff() != score()->staff(staffIdx())->barLineSpan();
     if (localDrag) {
         Segment* s = segment();
-        bool breakLast = staffIdx1 == staffIdx2;
         for (staff_idx_t staffIdx = staffIdx1; staffIdx < staffIdx2; ++staffIdx) {
             BarLine* b = toBarLine(s->element(staffIdx * VOICES));
             if (!b) {
@@ -683,23 +691,20 @@ void BarLine::endDragGrip(EditData& ed)
                 b->setOwnershipParent(s);
                 score()->undoAddElement(b);
             }
-            breakLast = b->spanTo();
             b->undoChangeProperty(Pid::BARLINE_SPAN, true);
         }
-        if (breakLast) {
-            BarLine* b = toBarLine(s->element(staffIdx2 * VOICES));
+        if (breakSpanAt != muse::nidx) {
+            BarLine* b = toBarLine(s->element(breakSpanAt * VOICES));
             if (b) {
                 b->undoChangeProperty(Pid::BARLINE_SPAN, false);
             }
         }
     } else {
-        bool breakLast = staffIdx1 == staffIdx2;
         for (staff_idx_t staffIdx = staffIdx1; staffIdx < staffIdx2; ++staffIdx) {
-            breakLast = score()->staff(staffIdx)->barLineSpan();
             score()->staff(staffIdx)->undoChangeProperty(Pid::STAFF_BARLINE_SPAN, true);
         }
-        if (breakLast) {
-            score()->staff(staffIdx2)->undoChangeProperty(Pid::STAFF_BARLINE_SPAN, false);
+        if (breakSpanAt != muse::nidx) {
+            score()->staff(breakSpanAt)->undoChangeProperty(Pid::STAFF_BARLINE_SPAN, false);
         }
         staff()->undoChangeProperty(Pid::STAFF_BARLINE_SPAN_FROM, newSpanFrom);
         staff()->undoChangeProperty(Pid::STAFF_BARLINE_SPAN_TO,   newSpanTo);
