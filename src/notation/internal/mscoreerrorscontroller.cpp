@@ -183,6 +183,17 @@ void MScoreErrorsController::checkAndShowMScoreError()
         title = muse::trc("notation", "Can’t explode or implode");
         message = muse::trc("notation", "Cannot explode or implode between different local time signatures");
         break;
+    case MsError::NO_SPACE_FOR_TUPLET:
+        title = muse::trc("notation", "Cannot create tuplet");
+        message = muse::trc("notation", "There isn’t enough space for this tuplet before the end of the measure "
+                                        "(or of the tuplet it would be in).");
+        break;
+    case MsError::NOTE_VALUE_TUPLET_ON_SEVERAL_CHORD_RESTS:
+        title = muse::trc("notation", "Cannot create tuplet");
+        message = muse::trc("notation", "A tuplet that uses the selected duration as its note value can only be added "
+                                        "to one note or rest at a time (or one per staff). "
+                                        "Select a single note or rest and try again.");
+        break;
     }
 
     m_currentDialogError = err;

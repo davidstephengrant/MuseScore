@@ -1518,7 +1518,8 @@ void NotationActionController::putTuplet(const TupletOptions& options)
         return;
     }
 
-    if (!interaction->canAddTupletToSelectedChordRests()) {
+    // note value tuplets are checked when they're added
+    if (!options.selectedDurationAsNoteValue && !interaction->canAddTupletToSelectedChordRests()) {
         interactive()->error(muse::trc("notation", "Cannot create tuplet"), muse::trc("notation", "Note value is too short"));
         return;
     }

@@ -34,9 +34,15 @@ class Transaction;
 class EditTuplet
 {
 public:
+    // Tuplets on the selected chords/rests that use their durations as the note value (3:2 on a quarter: 3 quarters
+    // in the time of 2). Measure rests are divided instead
+    static bool checkAddTupletsWithSelectedDurations(const Score* score, const Fraction& ratio);
+
     // Divides each selected chord/rest into a tuplet (3:2 on a quarter: 3 eighths in the time of a quarter). Keeps a range
     // selection, otherwise selects the start of the first tuplet. Returns the tuplets in score order
+    // With selectedDurationAsNoteValue, call checkAddTupletsWithSelectedDurations() first: Score::addTuplet() shows a
+    // warning otherwise
     static std::vector<Tuplet*> addTuplets(Transaction& tx, Score* score, const Fraction& ratio, TupletNumberType numberType,
-                                           TupletBracketType bracketType, bool autoBaseLen);
+                                           TupletBracketType bracketType, bool autoBaseLen, bool selectedDurationAsNoteValue = false);
 };
 }

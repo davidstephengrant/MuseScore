@@ -66,5 +66,8 @@ struct TupletOptions
     engraving::TupletNumberType numberType = engraving::TupletNumberType::SHOW_NUMBER;
     engraving::TupletBracketType bracketType = engraving::TupletBracketType::AUTO_BRACKET;
     bool autoBaseLen = false;
+
+    // Use the selected duration as the note value instead of dividing it (3:2 on an eighth: 3 eighths in the time of 2)
+    bool selectedDurationAsNoteValue = false;
 };
 }
