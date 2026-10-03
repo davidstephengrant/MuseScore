@@ -110,6 +110,29 @@
          </layout>
         </item>
         <item>
+         <widget class="QRadioButton" name="useSelectedDuration">
+          <property name="text">
+           <string>Selected duration as note value</string>
+          </property>
+          <property name="toolTip">
+           <string>Each note of the tuplet has the selected duration, and the tuplet replaces the notes and rests in the time it takes. For example, with a quarter selected, 3:2 gives 3 quarters in the time of 2. A full-measure rest is still divided.</string>
+          </property>
+          <property name="checked">
+           <bool>true</bool>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QRadioButton" name="divideDuration">
+          <property name="text">
+           <string>Selected duration as tuplet length</string>
+          </property>
+          <property name="toolTip">
+           <string>The tuplet takes the time of the selected duration. For example, with a quarter selected, 3:2 gives 3 eighths in the time of a quarter.</string>
+          </property>
+         </widget>
+        </item>
+        <item>
          <spacer name="verticalSpacer">
           <property name="orientation">
            <enum>Qt::Vertical</enum>

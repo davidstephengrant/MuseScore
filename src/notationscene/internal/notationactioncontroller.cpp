@@ -1500,6 +1500,7 @@ muse::Ret NotationActionController::putTuplet(const muse::rcommand::Params& para
     options.numberType = engraving::str_conv(params.at("number-type").toString(), engraving::TupletNumberType::SHOW_NUMBER);
     options.bracketType = engraving::str_conv(params.at("bracket-type").toString(), engraving::TupletBracketType::AUTO_BRACKET);
     options.autoBaseLen = params.at("auto-baselen", Val(false)).toBool();
+    options.selectedDurationAsNoteValue = params.at("selected-duration-as-note-value", Val(false)).toBool();
 
     putTuplet(options);
     return muse::make_ok();

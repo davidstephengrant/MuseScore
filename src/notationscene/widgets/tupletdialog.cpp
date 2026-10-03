@@ -132,6 +132,7 @@ void TupletDialog::apply()
     query.addParam("ratio", Val(Fraction(actualNotes->value(), normalNotes->value()).toString().toStdString()));
     query.addParam("number-type", Val(engraving::str_conv(numberType())));
     query.addParam("bracket-type", Val(engraving::str_conv(bracketType())));
+    query.addParam("selected-duration-as-note-value", Val(useSelectedDuration->isChecked()));
 
     dispatcher()->dispatch(query);
 }

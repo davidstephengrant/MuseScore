@@ -897,6 +897,8 @@ static const std::vector<CommandInfo> s_commandInfos = {
             { "number-type", Arg(DataType::String, u"Tuplet number type (number, relation, none)") },
             { "bracket-type", Arg(DataType::String, u"Tuplet bracket type (auto, show, none)") },
             { "auto-baselen", Arg(DataType::Boolean, u"Auto base length") },
+            { "selected-duration-as-note-value", Arg(DataType::Boolean,
+                                                     u"Use the selected duration as the note value instead of dividing it") },
         }),
         Decoration()
     },
