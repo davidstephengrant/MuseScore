@@ -752,9 +752,10 @@ static FittedPattern fitPatternToStaff(double length, double nominalDash, double
 
 using BarLineStroke = TDraw::BarLineStroke;
 
-// The strokes a fitted pattern is drawn with
+// The strokes a fitted pattern is drawn with. `yClip` stops them where a drag has shortened the
+// barline.
 static void appendFittedPattern(std::vector<BarLineStroke>& out, double lw, double yStart,
-                                const FittedPattern& pattern)
+                                const FittedPattern& pattern, double yClip)
 {
     if (pattern.count <= 0 || pattern.dash <= 0.0) {
         return;
@@ -762,7 +763,10 @@ static void appendFittedPattern(std::vector<BarLineStroke>& out, double lw, doub
 
     const double period = pattern.dash + pattern.gap;
     const double first = yStart + pattern.offset;
-    const double bottom = first + (pattern.count - 1) * period + pattern.dash;
+    const double bottom = std::min(first + (pattern.count - 1) * period + pattern.dash, yClip);
+    if (bottom <= first) {
+        return;
+    }
 
     if (pattern.gap <= 0.0 || RealIsNull(lw)) {
         // Nothing to repeat: a lone dash, or dashes with no gap between them
@@ -813,14 +817,19 @@ static std::vector<BarLineStroke> patternedBarLineStrokes(const BarLine* item, d
 
     std::vector<BarLineStroke> strokes;
 
-    // A barline can be shorter than its own staff, hence the clamp
-    const double yStaffBottom = std::min(y2Staff, y2);
+    // While a grip is dragged, y2 follows the pointer but the staves either side do not move. Hold
+    // the fit at that settled geometry and clip at y2; refitting per move would slide the dashes.
+    const bool dragging = item->ldata()->isDragging;
+
+    // A barline can also be shorter than its own staff without being dragged, hence the clamp
+    const double yStaffBottom = dragging ? y2Staff : std::min(y2Staff, y2);
     const double minDashGap = std::min(nominalGap, MIN_DASH_GAP * item->spatium());
 
-    appendFittedPattern(strokes, lw, y1, fitPatternToStaff(yStaffBottom - y1, nominalDash, nominalGap, minDashGap));
+    appendFittedPattern(strokes, lw, y1, fitPatternToStaff(yStaffBottom - y1, nominalDash, nominalGap, minDashGap), y2);
 
     if (y2 > yStaffBottom) {
-        // For now the staff's pattern simply carries on into the space between the staves
+        // For now the staff's pattern simply carries on into the space between the staves, and during
+        // a drag on to the pointer, rather than being refitted
         appendCarriedPattern(strokes, y1, y2, nominalDash, nominalGap);
     }
     return strokes;

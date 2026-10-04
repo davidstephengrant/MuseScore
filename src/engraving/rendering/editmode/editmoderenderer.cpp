@@ -152,22 +152,50 @@ void EditModeRenderer::drawEngravingItem(const EngravingItem* item, muse::draw::
     }
 }
 
+// Applies the drag offsets for as long as the barline is being drawn, and puts back what was
+// there before. TDraw reads the geometry from the item's own layout data, so there is nowhere else.
+class BarLineDragGeometry
+{
+public:
+    BarLineDragGeometry(const BarLine* item, const BarLineEditData* bed)
+        : m_ldata(const_cast<BarLine::LayoutData*>(item->ldata())),
+        m_y1(m_ldata->y1), m_y2(m_ldata->y2), m_isDragging(m_ldata->isDragging)
+    {
+        m_ldata->y1 += bed->yoff1;
+        m_ldata->y2 += bed->yoff2;
+        m_ldata->isDragging = !muse::RealIsNull(bed->yoff1) || !muse::RealIsNull(bed->yoff2);
+    }
+
+    ~BarLineDragGeometry()
+    {
+        m_ldata->y1 = m_y1;
+        m_ldata->y2 = m_y2;
+        m_ldata->isDragging = m_isDragging;
+    }
+
+    BarLineDragGeometry(const BarLineDragGeometry&) = delete;
+    BarLineDragGeometry& operator=(const BarLineDragGeometry&) = delete;
+
+private:
+    BarLine::LayoutData* const m_ldata = nullptr;
+    const double m_y1 = 0.0;
+    const double m_y2 = 0.0;
+    const bool m_isDragging = false;
+};
+
 void EditModeRenderer::drawBarline(const BarLine* item, muse::draw::Painter* painter, const EditData& ed, double currentViewScaling,
                                    const PaintOptions& opt)
 {
     drawEngravingItem(item, painter, ed, currentViewScaling, opt);
 
     const BarLineEditData* bed = static_cast<BarLineEditData*>(ed.getData(item).get());
-    BarLine::LayoutData* ldata = const_cast<BarLine::LayoutData*>(item->ldata());
-    ldata->y1 += bed->yoff1;
-    ldata->y2 += bed->yoff2;
+    const BarLineDragGeometry dragGeometry(item, bed);
+
     PointF pos(item->canvasPos());
     painter->translate(pos);
 
     score::TDraw::drawItem(item, painter, opt);
 
-    ldata->y1 -= bed->yoff1;
-    ldata->y2 -= bed->yoff2;
     painter->translate(-pos);
 }
 

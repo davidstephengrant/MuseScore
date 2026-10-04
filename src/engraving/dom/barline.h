@@ -167,6 +167,8 @@ public:
         double y2 = 0.0;
         // Bottom of the origin staff; equal to y2 unless the barline spans to the staff below
         double y2Staff = 0.0;
+        // Set only while a grip is dragged; the fit is then held still and the drawing clipped at y2
+        bool isDragging = false;
     };
 
     DECLARE_LAYOUTDATA_METHODS(BarLine)
