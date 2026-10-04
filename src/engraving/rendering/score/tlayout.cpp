@@ -1116,6 +1116,7 @@ void TLayout::layoutBarLine(const BarLine* item, BarLine::LayoutData* ldata, con
 
     ldata->y1 = spatium * .5 * item->spanFrom();
     ldata->y2 = spatium * .5 * (8.0 + item->spanTo());
+    ldata->y2Staff = ldata->y2;
 
     const IEngravingFontPtr font = ctx.engravingFont();
     const double magS = ctx.conf().magS(ldata->mag());

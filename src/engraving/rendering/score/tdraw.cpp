@@ -712,6 +712,165 @@ static void drawTips(const BarLine* item, const BarLine::LayoutData* data, Paint
     }
 }
 
+struct FittedPattern {
+    int count = 0;
+    double dash = 0.0;          // length of each dash or dot
+    double gap = 0.0;           // gap between consecutive dashes or dots
+    double offset = 0.0;        // from the start of the barline to the first dash or dot
+};
+
+// Consecutive dashes keep at least this much of a gap between them, in staff spaces, or the
+// nominal gap where that is narrower, so that a tight fit does not read as a solid line
+static constexpr double MIN_DASH_GAP = 0.15;
+
+// Fits a whole number of dashes (or dots) into `length` so that it both starts and ends with one,
+// i.e. `length == count * dash + (count - 1) * gap`. Only the gaps flex; the dash keeps its length,
+// and `minGap` stops a tight fit closing them up into what reads as a solid line.
+static FittedPattern fitPatternToStaff(double length, double nominalDash, double nominalGap, double minGap)
+{
+    if (length <= 0.0 || nominalDash <= 0.0) {
+        return FittedPattern();
+    }
+
+    if (length <= nominalDash) {
+        return { 1, length, 0.0, 0.0 };
+    }
+
+    // Rearranging for count gives (length + gap) / (dash + gap); the same at minGap is the most
+    // that fit without the dashes closing up
+    const int maxCount = static_cast<int>(std::floor((length + minGap) / (nominalDash + minGap)));
+    const int count = std::clamp(static_cast<int>(std::lround((length + nominalGap) / (nominalDash + nominalGap))),
+                                 1, std::max(1, maxCount));
+
+    if (count == 1) {
+        // One dash cannot both start and end the pattern, so centre it
+        return { 1, nominalDash, 0.0, (length - nominalDash) * 0.5 };
+    }
+
+    return { count, nominalDash, (length - count * nominalDash) / (count - 1), 0.0 };
+}
+
+using BarLineStroke = TDraw::BarLineStroke;
+
+// The strokes a fitted pattern is drawn with
+static void appendFittedPattern(std::vector<BarLineStroke>& out, double lw, double yStart,
+                                const FittedPattern& pattern)
+{
+    if (pattern.count <= 0 || pattern.dash <= 0.0) {
+        return;
+    }
+
+    const double period = pattern.dash + pattern.gap;
+    const double first = yStart + pattern.offset;
+    const double bottom = first + (pattern.count - 1) * period + pattern.dash;
+
+    if (pattern.gap <= 0.0 || RealIsNull(lw)) {
+        // Nothing to repeat: a lone dash, or dashes with no gap between them
+        out.push_back({ first, bottom, 0.0, 0.0 });
+        return;
+    }
+
+    // The pattern is uniform, so one stroke carries it in its pen
+    out.push_back({ first, bottom, pattern.dash, pattern.gap });
+}
+
+// Carries the last stroke's dash and gap on down to yEnd, rather than fitting anything new
+static void appendCarriedPattern(std::vector<BarLineStroke>& out, double yFrom, double yEnd, double nominalDash,
+                                 double nominalGap)
+{
+    if (out.empty()) {
+        if (yEnd > yFrom) {
+            out.push_back({ yFrom, yEnd, nominalDash, nominalGap });
+        }
+        return;
+    }
+
+    BarLineStroke& last = out.back();
+    if (last.y2 >= yEnd) {
+        return;
+    }
+
+    if (last.dash > 0.0 && last.gap > 0.0) {
+        // The pen's pattern simply carries on in phase, so the stroke only has to reach further
+        last.y2 = yEnd;
+        return;
+    }
+
+    // A lone dash, centred in its space, has no gap of its own to carry on with
+    out.push_back({ last.y2 + nominalGap, yEnd, last.dash > 0.0 ? last.dash : nominalDash, nominalGap });
+}
+
+// The strokes a dashed or dotted barline between y1 and y2 is drawn with, where y2Staff is the
+// bottom of the staff it starts on.
+static std::vector<BarLineStroke> patternedBarLineStrokes(const BarLine* item, double lw, double nominalDash,
+                                                          double nominalGap, double y1, double y2, double y2Staff)
+{
+    const BarlineDashFitMode fitMode = item->style().styleV(Sid::barlineDashFitMode).value<BarlineDashFitMode>();
+    if (fitMode == BarlineDashFitMode::UNFITTED) {
+        // One stroke over the whole barline, carrying the nominal pattern in its pen
+        return { { y1, y2, nominalDash, nominalGap } };
+    }
+
+    std::vector<BarLineStroke> strokes;
+
+    // A barline can be shorter than its own staff, hence the clamp
+    const double yStaffBottom = std::min(y2Staff, y2);
+    const double minDashGap = std::min(nominalGap, MIN_DASH_GAP * item->spatium());
+
+    appendFittedPattern(strokes, lw, y1, fitPatternToStaff(yStaffBottom - y1, nominalDash, nominalGap, minDashGap));
+
+    if (y2 > yStaffBottom) {
+        // For now the staff's pattern simply carries on into the space between the staves
+        appendCarriedPattern(strokes, y1, y2, nominalDash, nominalGap);
+    }
+    return strokes;
+}
+
+// Draws a dashed or dotted barline as the strokes it decomposes into
+static void drawPatternedBarLine(const BarLine* item, Painter* painter, const rendering::PaintOptions& opt, double lw)
+{
+    const double x = lw * .5;
+    const Pen base(item->curColor(opt), lw, PenStyle::SolidLine, PenCapStyle::FlatCap);
+
+    for (const BarLineStroke& stroke : TDraw::barLineStrokes(item)) {
+        Pen pen = base;
+        if (stroke.dash > 0.0 && stroke.gap > 0.0 && !RealIsNull(lw)) {
+            // Pattern lengths are in units of the pen width
+            pen.setStyle(PenStyle::DashLine);
+            pen.setDashPattern({ stroke.dash / lw, stroke.gap / lw });
+        }
+        painter->setPen(pen);
+        painter->drawLine(LineF(x, stroke.y1, x, stroke.y2));
+    }
+}
+
+std::vector<TDraw::BarLineStroke> TDraw::barLineStrokes(const BarLine* item)
+{
+    const BarLine::LayoutData* data = item->ldata();
+    IF_ASSERT_FAILED(data) {
+        return {};
+    }
+
+    switch (item->barLineType()) {
+    case BarLineType::BROKEN: {
+        const double lw = item->style().styleAbsolute(Sid::dashBarWidth) * item->mag();
+        return patternedBarLineStrokes(item, lw,
+                                       item->style().styleAbsolute(Sid::dashBarDash) * item->mag(),
+                                       item->style().styleAbsolute(Sid::dashBarGap) * item->mag(),
+                                       data->y1, data->y2, data->y2Staff);
+    }
+    case BarLineType::DOTTED: {
+        // A dot is a square of the barline's thickness, twice that apart: PenStyle::DotLine's proportions
+        const double lw = item->style().styleAbsolute(Sid::barWidth) * item->mag();
+        return patternedBarLineStrokes(item, lw, lw, 2.0 * lw,
+                                       data->y1, data->y2, data->y2Staff);
+    }
+    default:
+        // Every other type is one solid stroke down the whole barline
+        return { { data->y1, data->y2, 0.0, 0.0 } };
+    }
+}
+
 void TDraw::draw(const BarLine* item, Painter* painter, const PaintOptions& opt)
 {
     TRACE_DRAW_ITEM;
@@ -738,19 +897,14 @@ void TDraw::draw(const BarLine* item, Painter* painter, const PaintOptions& opt)
 
     case BarLineType::BROKEN: {
         double lw = item->style().styleAbsolute(Sid::dashBarWidth) * item->mag();
-        double dl = RealIsNull(lw) ? 0.0 : item->style().styleAbsolute(Sid::dashBarDash) * item->mag() / lw;
-        double gl = RealIsNull(lw) ? 0.0 : item->style().styleAbsolute(Sid::dashBarGap) * item->mag() / lw;
-        Pen pen(item->curColor(opt), lw, PenStyle::DashLine, PenCapStyle::FlatCap);
-        pen.setDashPattern({ dl, gl });
-        painter->setPen(pen);
-        painter->drawLine(LineF(lw * .5, data->y1, lw * .5, data->y2));
+        drawPatternedBarLine(item, painter, opt, lw);
     }
     break;
 
     case BarLineType::DOTTED: {
+        // A dot is a square of the barline's thickness, twice that apart: PenStyle::DotLine's proportions
         double lw = item->style().styleAbsolute(Sid::barWidth) * item->mag();
-        painter->setPen(Pen(item->curColor(opt), lw, PenStyle::DotLine, PenCapStyle::FlatCap));
-        painter->drawLine(LineF(lw * .5, data->y1, lw * .5, data->y2));
+        drawPatternedBarLine(item, painter, opt, lw);
     }
     break;
 

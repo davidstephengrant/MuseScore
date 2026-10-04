@@ -21,6 +21,8 @@
  */
 #pragma once
 
+#include <vector>
+
 #include "dom/engravingitem.h"
 
 namespace mu::engraving {
@@ -190,6 +192,18 @@ class TDraw
 public:
 
     static void drawItem(const EngravingItem* item, muse::draw::Painter* painter, const PaintOptions& opt); // factory
+
+    // One stroke of a barline as it is actually drawn. A stroke carrying a dash pattern is a single
+    // stroke however many dashes it shows; `dash` is zero where the stroke is solid instead.
+    struct BarLineStroke {
+        double y1 = 0.0;
+        double y2 = 0.0;
+        double dash = 0.0;
+        double gap = 0.0;
+    };
+
+    // The strokes the barline is drawn with, in the order they are drawn
+    static std::vector<BarLineStroke> barLineStrokes(const BarLine* item);
 
 private:
     static void draw(const Accidental* item, muse::draw::Painter* painter, const PaintOptions& opt);
