@@ -3237,6 +3237,13 @@ static const std::vector<CommandInfo> s_commandInfos = {
         Decoration()
     },
     CommandInfo {
+        COLOR_BARLINE_STROKES_COMMAND,
+        TranslatableString("action", "Color barline strokes"),
+        TranslatableString("action", "Diagnostic: Color barline strokes"),
+        InputSchema(),
+        Decoration()
+    },
+    CommandInfo {
         CHECK_FOR_SCORE_CORRUPTIONS_COMMAND,
         TranslatableString("action", "Check for score corruptions"),
         TranslatableString("action", "Diagnostic: Check for score corruptions"),

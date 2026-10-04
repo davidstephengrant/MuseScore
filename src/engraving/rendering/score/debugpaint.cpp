@@ -25,6 +25,7 @@
 #include "iengravingcontextconfiguration.h" // IWYU pragma: keep
 
 //#include "accessibility/accessibleitem.h"
+#include "dom/barline.h"
 #include "dom/page.h"
 #include "dom/score.h"
 #include "dom/system.h"
@@ -120,6 +121,32 @@ void DebugPaint::paintElementDebug(Painter& painter, const EngravingItem* item)
             for (const LineAttachPoint& lap : toNote(item)->lineAttachPoints()) {
                 PointF point = lap.pos();
                 painter.drawEllipse(RectF(point.x() - radius, point.y() - radius, 2 * radius, 2 * radius));
+            }
+        }
+
+        if (item->isBarLine() && item->configuration()->debuggingOptions().colorBarlineStrokes) {
+            const BarLine* barLine = toBarLine(item);
+
+            // Grow the bbox equally either side, so the band stays centred whatever the barline's
+            // thickness. The margin is in score spatium, not the staff's, so that a barline spanning
+            // staves of different sizes keeps one width down its whole length.
+            const double margin = 0.25 * item->style().spatium();
+            const double x = bbox.x() - margin;
+            const double width = bbox.width() + 2.0 * margin;
+
+            painter.setPen(PenStyle::NoPen);
+
+            // One band per stroke the barline is actually drawn with, rather than per dash: a
+            // stroke carrying a dash pattern shows many dashes but is drawn once
+            const std::vector<TDraw::BarLineStroke> strokes = TDraw::barLineStrokes(barLine);
+            for (size_t i = 0; i < strokes.size(); ++i) {
+                const TDraw::BarLineStroke& stroke = strokes.at(i);
+                // Offset the address per stroke so each takes its own colour. It is only ever
+                // hashed for that colour, never used as a pointer. The multiplier spreads the
+                // offset across the bits the colour reads, as some hashes return a pointer unchanged.
+                const auto strokeId = reinterpret_cast<uintptr_t>(barLine) + i * uintptr_t(0x9E3779B9);
+                painter.setBrush(colorForPointer(reinterpret_cast<const void*>(strokeId)));
+                painter.drawRect(RectF(x, stroke.y1, width, stroke.y2 - stroke.y1));
             }
         }
 

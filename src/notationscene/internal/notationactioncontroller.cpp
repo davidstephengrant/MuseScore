@@ -86,6 +86,7 @@ static const std::map<muse::rcommand::Command, bool EngravingDebuggingOptions::*
     { MARK_CORRUPTED_MEASURES_COMMAND, &EngravingDebuggingOptions::markCorruptedMeasures },
     { SHOW_GAP_RESTS_COMMAND, &EngravingDebuggingOptions::showGapRests },
     { SHOW_ORIGIN_AND_COMBINED_COMMAND, &EngravingDebuggingOptions::showOriginAndCombinedStaves },
+    { COLOR_BARLINE_STROKES_COMMAND, &EngravingDebuggingOptions::colorBarlineStrokes },
 };
 
 //! NOTE Just for more readable

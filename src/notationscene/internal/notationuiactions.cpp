@@ -2865,6 +2865,13 @@ const UiActionList NotationUiActions::s_engravingDebuggingActions = {
              TranslatableString("action", "Show both origin and combined staves"),
              Checkable::Yes
              ),
+    UiAction("color-barline-strokes",
+             mu::context::UiCtxProjectOpened,
+             mu::context::CTX_NOTATION_OPENED,
+             TranslatableString("action", "Color barline strokes"),
+             TranslatableString("action", "Color barline strokes"),
+             Checkable::Yes
+             ),
     UiAction("check-for-score-corruptions",
              mu::context::UiCtxProjectOpened,
              mu::context::CTX_NOTATION_OPENED,
