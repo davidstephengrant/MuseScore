@@ -588,6 +588,19 @@ constexpr bool operator&(BarLineType t1, BarLineType t2)
     return static_cast<int>(t1) & static_cast<int>(t2);
 }
 
+// How the dashes or dots of a BROKEN or DOTTED barline are spaced. Values are serialised, so
+// only ever append to this.
+enum class BarlineDashFitMode : unsigned char {
+    // Each barline is fitted to its own staff, and the space between two spanned staves is
+    // fitted as a segment in its own right
+    FIT_TO_STAVES,
+    // One fit across every staff a barline spans, so the pattern runs unbroken from the top of
+    // the first staff to the bottom of the last rather than restarting at each staff
+    JOIN_SPANNED,
+    // One nominal pattern per barline, fitted to nothing
+    UNFITTED,
+};
+
 enum class MeasureNumberPlacement {
     ABOVE_SYSTEM,
     BELOW_SYSTEM,

@@ -265,6 +265,11 @@ void EditStyle::classBegin()
     // use this group widgets in list styleWidgets
     // This works for groups which represent an int enumeration.
 
+    QButtonGroup* barlineDashFit = new QButtonGroup(this);
+    barlineDashFit->addButton(radioBarlineDashFitJoined, int(BarlineDashFitMode::JOIN_SPANNED));
+    barlineDashFit->addButton(radioBarlineDashFitToStaves, int(BarlineDashFitMode::FIT_TO_STAVES));
+    barlineDashFit->addButton(radioBarlineDashFitUnfitted, int(BarlineDashFitMode::UNFITTED));
+
     QButtonGroup* ksbl = new QButtonGroup(this);
     ksbl->addButton(radioKeySigCourtesyBarlineAlwaysSingle, int(CourtesyBarlineMode::ALWAYS_SINGLE));
     ksbl->addButton(radioKeySigCourtesyBarlineAlwaysDouble, int(CourtesyBarlineMode::ALWAYS_DOUBLE));
@@ -437,6 +442,7 @@ void EditStyle::classBegin()
         { StyleId::dashBarWidth,            false, dashBarWidth,            resetDashBarWidth },
         { StyleId::dashBarDash,             false, dashBarDash,             resetDashBarDash },
         { StyleId::dashBarGap,              false, dashBarGap,              resetDashBarGap },
+        { StyleId::barlineDashFitMode,      false, barlineDashFit,          0 },
         { StyleId::endBarDistance,          false, endBarDistance,          resetEndBarDistance },
         { StyleId::doubleBarWidth,          false, doubleBarWidth,          resetDoubleBarWidth },
         { StyleId::doubleBarDistance,       false, doubleBarDistance,       resetDoubleBarDistance },

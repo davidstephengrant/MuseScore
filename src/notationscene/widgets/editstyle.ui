@@ -5335,6 +5335,36 @@
              </widget>
             </item>
             <item>
+             <widget class="QGroupBox" name="barlineDashFitModeGroup">
+              <property name="title">
+               <string>Dashed and dotted barlines</string>
+              </property>
+              <layout class="QVBoxLayout" name="verticalLayout_barlineDashFitMode">
+               <item>
+                <widget class="QRadioButton" name="radioBarlineDashFitJoined">
+                 <property name="text">
+                  <string>Fit across joined staves</string>
+                 </property>
+                </widget>
+               </item>
+               <item>
+                <widget class="QRadioButton" name="radioBarlineDashFitToStaves">
+                 <property name="text">
+                  <string>Fit to each staff</string>
+                 </property>
+                </widget>
+               </item>
+               <item>
+                <widget class="QRadioButton" name="radioBarlineDashFitUnfitted">
+                 <property name="text">
+                  <string>Don't fit</string>
+                 </property>
+                </widget>
+               </item>
+              </layout>
+             </widget>
+            </item>
+            <item>
              <widget class="QGroupBox" name="keySigCourtesyBarlineGroup">
               <property name="title">
                <string>Use double barlines before key signatures</string>
@@ -13898,6 +13928,9 @@ followed by dashes</string>
   <tabstop>resetDashBarGap</tabstop>
   <tabstop>repeatBarlineDotSeparation</tabstop>
   <tabstop>resetRepeatBarlineDotSeparation</tabstop>
+  <tabstop>radioBarlineDashFitJoined</tabstop>
+  <tabstop>radioBarlineDashFitToStaves</tabstop>
+  <tabstop>radioBarlineDashFitUnfitted</tabstop>
   <tabstop>radioKeySigCourtesyBarlineAlwaysDouble</tabstop>
   <tabstop>radioKeySigCourtesyBarlineAlwaysSingle</tabstop>
   <tabstop>radioKeySigCourtesyBarlineDoubleBeforeNewSystem</tabstop>

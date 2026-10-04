@@ -194,6 +194,7 @@ enum class Sid : short {
     dashBarWidth,
     dashBarDash,
     dashBarGap,
+    barlineDashFitMode,
     doubleBarDistance,
     endBarDistance,
     repeatBarlineDotSeparation,
