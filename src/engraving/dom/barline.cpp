@@ -374,6 +374,52 @@ const BarLine* BarLine::barLineBelow() const
     return idx == staffIdx() ? nullptr : toBarLine(segment()->element(idx * VOICES));
 }
 
+const BarLine* BarLine::barLineAbove() const
+{
+    if (!segment()) {
+        return nullptr;
+    }
+
+    const staff_idx_t idx = prevVisibleSpannedStaff(this);
+    const BarLine* above = idx == staffIdx() ? nullptr : toBarLine(segment()->element(idx * VOICES));
+    return above && above->barLineBelow() == this ? above : nullptr;
+}
+
+bool BarLine::joinsBelow() const
+{
+    const BarLine* below = barLineBelow();
+    return below && below->barLineType() == m_barLineType && RealIsEqual(below->mag(), mag());
+}
+
+BarLine::JoinedRun BarLine::joinedDashRun() const
+{
+    const LayoutData* data = ldata();
+    const System* system = segment() ? segment()->measure()->system() : nullptr;
+    if (!system) {
+        return { 0.0, data->y2Staff - data->y1 };
+    }
+
+    // Walk out to both ends of the run. A barline that joins nothing is its own run, which leaves
+    // this the same length as the staff on its own.
+    const BarLine* top = this;
+    for (const BarLine* above = barLineAbove(); above && above->joinsBelow(); above = above->barLineAbove()) {
+        top = above;
+    }
+
+    const BarLine* bottom = this;
+    while (bottom->joinsBelow()) {
+        bottom = bottom->barLineBelow();
+    }
+
+    // Each barline's layout data is measured from its own staff, so bring the two ends into
+    // this one's frame before taking the length between them
+    const double ownStaffY = system->staff(staffIdx())->y();
+    const double topY = system->staff(top->staffIdx())->y() - ownStaffY + top->ldata()->y1;
+    const double bottomY = system->staff(bottom->staffIdx())->y() - ownStaffY + bottom->ldata()->y2Staff;
+
+    return { data->y1 - topY, bottomY - topY };
+}
+
 //---------------------------------------------------------
 //   isTop
 //---------------------------------------------------------

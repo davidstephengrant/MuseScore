@@ -128,6 +128,19 @@ public:
     bool isTop() const;
     bool isBottom() const;
 
+    // Whether the barline this one spans to carries its dash pattern on, which needs the same
+    // type and staff size
+    bool joinsBelow() const;
+
+    // The run of staves joined into one pattern, as one length to fit it across. Describes the
+    // settled geometry, so it does not follow a grip being dragged.
+    struct JoinedRun {
+        // From the top of the run down to this barline's own y1; zero where it starts the run
+        double offset = 0.0;
+        double length = 0.0;
+    };
+    JoinedRun joinedDashRun() const;
+
     int subtype() const override { return int(m_barLineType); }
     TranslatableString subtypeUserName() const override;
 
@@ -180,6 +193,8 @@ private:
 
     // The barline on the staff this one spans to, or nullptr if it does not span
     const BarLine* barLineBelow() const;
+    // The barline on the staff that spans to this one, or nullptr if none does
+    const BarLine* barLineAbove() const;
 
     friend class Factory;
     BarLine(Segment* parent);

@@ -21,6 +21,8 @@
  */
 #include "tdraw.h"
 
+#include <limits>
+
 #include "defer.h"
 
 #include "draw/fontmetrics.h"
@@ -799,10 +801,13 @@ static FittedPattern fitPatternBetweenStaves(double length, double nominalDash, 
 
 using BarLineStroke = TDraw::BarLineStroke;
 
-// The strokes a fitted pattern is drawn with. `yClip` stops them where a drag has shortened the
-// barline.
+// The strokes a fitted pattern is drawn with. The pen's pattern can only begin on a dash, so where
+// the top clip cuts into one - the pattern being fitted to a run starting on a staff further up -
+// that dash is the one stroke drawn on its own. `yClip` stops the rest where a drag has shortened
+// the barline.
 static void appendFittedPattern(std::vector<BarLineStroke>& out, double lw, double yStart,
-                                const FittedPattern& pattern, double yClip)
+                                const FittedPattern& pattern, double yClip,
+                                double yClipTop = -std::numeric_limits<double>::max())
 {
     if (pattern.count <= 0 || pattern.dash <= 0.0) {
         return;
@@ -810,19 +815,38 @@ static void appendFittedPattern(std::vector<BarLineStroke>& out, double lw, doub
 
     const double period = pattern.dash + pattern.gap;
     const double first = yStart + pattern.offset;
+    const double top = std::max(first, yClipTop);
     const double bottom = std::min(first + (pattern.count - 1) * period + pattern.dash, yClip);
-    if (bottom <= first) {
+    if (bottom <= top) {
+        return;
+    }
+
+    // Step over whatever the top clip leaves entirely above this barline
+    double dashStart = first;
+    if (top > first && period > 0.0) {
+        dashStart += std::floor((top - first) / period) * period;
+    }
+
+    if (dashStart < top) {
+        const double dashEnd = std::min(dashStart + pattern.dash, bottom);
+        if (dashEnd > top) {
+            out.push_back({ top, dashEnd, 0.0, 0.0 });
+        }
+        dashStart += period;
+    }
+
+    if (dashStart >= bottom) {
         return;
     }
 
     if (pattern.gap <= 0.0 || RealIsNull(lw)) {
         // Nothing to repeat: a lone dash, or dashes with no gap between them
-        out.push_back({ first, bottom, 0.0, 0.0 });
+        out.push_back({ dashStart, bottom, 0.0, 0.0 });
         return;
     }
 
     // The pattern is uniform, so one stroke carries it in its pen
-    out.push_back({ first, bottom, pattern.dash, pattern.gap });
+    out.push_back({ dashStart, bottom, pattern.dash, pattern.gap });
 }
 
 // Carries the last stroke's dash and gap on down to yEnd, rather than fitting anything new
@@ -895,8 +919,27 @@ static std::vector<BarLineStroke> patternedBarLineStrokes(const BarLine* item, d
     const double yStaffBottom = dragging ? y2Staff : std::min(y2Staff, y2);
     const double minDashGap = std::min(nominalGap, MIN_DASH_GAP * item->spatium());
 
-    appendFittedPattern(strokes, lw, y1, fitPatternToStaff(yStaffBottom - y1, nominalDash, nominalGap, minDashGap), y2);
-    appendBetweenStaves(strokes, item, lw, nominalDash, nominalGap, yStaffBottom, y2, y2StaffBelow, dragging);
+    if (fitMode == BarlineDashFitMode::JOIN_SPANNED) {
+        // One fit across the whole run of joined staves, of which this draws the slice falling on its
+        // own. Every barline in the run derives the same fit from the same settled geometry, so the
+        // slices line up without the elements having to agree at paint time.
+        const BarLine::JoinedRun run = item->joinedDashRun();
+        const FittedPattern joined = fitPatternToStaff(run.length, nominalDash, nominalGap, minDashGap);
+
+        if (item->joinsBelow()) {
+            // y2 overshoots the staff below so that abutting strokes leave no seam, which a pattern
+            // running through the join does not need. Stop at that staff and let the next barline
+            // carry the run on, rather than the two of them inking the overlap twice.
+            appendFittedPattern(strokes, lw, y1 - run.offset, joined, dragging ? y2 : std::min(y2, y2StaffBelow), y1);
+        } else {
+            // The run ends on this staff, so the space below it is fitted on its own
+            appendFittedPattern(strokes, lw, y1 - run.offset, joined, y2, y1);
+            appendBetweenStaves(strokes, item, lw, nominalDash, nominalGap, yStaffBottom, y2, y2StaffBelow, dragging);
+        }
+    } else {
+        appendFittedPattern(strokes, lw, y1, fitPatternToStaff(yStaffBottom - y1, nominalDash, nominalGap, minDashGap), y2);
+        appendBetweenStaves(strokes, item, lw, nominalDash, nominalGap, yStaffBottom, y2, y2StaffBelow, dragging);
+    }
 
     if (dragging && y2 > yStaffBottom) {
         // The settled fit stops where the staves do, so carry it on to the pointer, rather than
