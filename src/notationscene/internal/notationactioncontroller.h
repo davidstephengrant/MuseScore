@@ -215,6 +215,7 @@ private:
     void openTransposeDialog();
     void openPartsDialog();
     void openTupletOtherDialog();
+    void toggleContinueTuplets();
     void openStaffTextPropertiesDialog();
     void openMeasurePropertiesDialog();
     void openEditGridSizeDialog();

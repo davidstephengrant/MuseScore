@@ -274,6 +274,7 @@ inline static const muse::rcommand::Command ADD_SEXTUPLET_COMMAND("command://not
 inline static const muse::rcommand::Command ADD_SEPTUPLET_COMMAND("command://notation/add-septuplet");
 inline static const muse::rcommand::Command ADD_OCTUPLET_COMMAND("command://notation/add-octuplet");
 inline static const muse::rcommand::Command ADD_NONUPLET_COMMAND("command://notation/add-nonuplet");
+inline static const muse::rcommand::Command TOGGLE_CONTINUE_TUPLETS_COMMAND("command://notation/toggle-continue-tuplets");
 
 inline static const muse::rcommand::Command INSERT_HBOX_COMMAND("command://notation/insert-hbox");
 inline static const muse::rcommand::Command INSERT_VBOX_COMMAND("command://notation/insert-vbox");

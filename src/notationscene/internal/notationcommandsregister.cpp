@@ -875,6 +875,13 @@ static const std::vector<CommandInfo> s_commandInfos = {
         Decoration()
     },
     CommandInfo{
+        TOGGLE_CONTINUE_TUPLETS_COMMAND,
+        TranslatableString("action", "Continue tuplets"),
+        TranslatableString("action", "Toggle continue tuplets"),
+        InputSchema(),
+        Decoration(rcommand::Checkable::Yes)
+    },
+    CommandInfo{
         ADD_TUPLET_COMMAND,
         TranslatableString("action", "Tuplet"),
         TranslatableString("action", "Enter tuplet"),

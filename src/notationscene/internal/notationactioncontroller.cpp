@@ -291,6 +291,7 @@ void NotationActionController::init()
     registerCommand(ADD_SEPTUPLET_COMMAND, [this]() { putTuplet(7); });
     registerCommand(ADD_OCTUPLET_COMMAND, [this]() { putTuplet(8); });
     registerCommand(ADD_NONUPLET_COMMAND, [this]() { putTuplet(9); });
+    registerCommand(TOGGLE_CONTINUE_TUPLETS_COMMAND, [this]() { toggleContinueTuplets(); });
 
     registerCommand(INSERT_HBOX_COMMAND, [this]() { addBoxes(BoxType::Horizontal, 1, AddBoxesTarget::BeforeSelection); });
     registerCommand(INSERT_VBOX_COMMAND, [this]() { addBoxes(BoxType::Vertical, 1, AddBoxesTarget::BeforeSelection); });
@@ -2618,6 +2619,18 @@ bool NotationActionController::isEditingText() const
 void NotationActionController::openTupletOtherDialog()
 {
     interactive()->open("musescore://notation/othertupletdialog");
+}
+
+void NotationActionController::toggleContinueTuplets()
+{
+    const bool on = !configuration()->continuingTupletInput();
+    configuration()->setContinuingTupletInput(on);
+
+    // during note input, the tuplet at the input position continues, or continuing tuplet input ends
+    INotationNoteInputPtr noteInput = currentNotationNoteInput();
+    if (noteInput && noteInput->isNoteInputMode()) {
+        noteInput->setContinueTuplets(on);
+    }
 }
 
 void NotationActionController::openStaffTextPropertiesDialog()

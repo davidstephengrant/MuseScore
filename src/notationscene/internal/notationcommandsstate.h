@@ -30,6 +30,7 @@
  #include "global/modularity/ioc.h"
  #include "interactive/iinteractive.h"
 #include "project/iprojectsession.h"
+#include "notation/inotationconfiguration.h"
 #include "rcommand/icommandsregister.h"
 #include "../inotationcommandscontroller.h"
 
@@ -40,6 +41,7 @@ class NotationCommandsState : public muse::rcommand::IModuleCommandsState, publi
     muse::ContextInject<muse::IInteractive> interactive = { this };
     muse::ContextInject<project::IProjectSession> projectSession = { this };
     muse::ContextInject<INotationCommandsController> controller = { this };
+    muse::GlobalInject<INotationConfiguration> configuration;
 public:
     NotationCommandsState(const muse::modularity::ContextPtr& ctx)
         : muse::Contextable(ctx) {}
