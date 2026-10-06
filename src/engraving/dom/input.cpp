@@ -252,6 +252,106 @@ bool InputState::inInsertedTuplet(const ChordRest* cr) const
     return tuplet && m_insertedTuplet && tuplet->tick() == m_insertedTuplet->first && tuplet->track() == m_insertedTuplet->second;
 }
 
+//---------------------------------------------------------
+//   stickyTupletsAllowed
+//    Whether the current note input method can keep
+//    creating tuplets
+//---------------------------------------------------------
+
+bool InputState::stickyTupletsAllowed() const
+{
+    switch (m_noteEntryMethod) {
+    case NoteEntryMethod::BY_NOTE_NAME:
+    case NoteEntryMethod::BY_DURATION:
+    case NoteEntryMethod::RHYTHM:
+        return true;
+    default:
+        return false;
+    }
+}
+
+//---------------------------------------------------------
+//   StickyTuplet::of
+//    The tuplet with the tuplets it is nested in
+//---------------------------------------------------------
+
+StickyTuplet StickyTuplet::of(const Tuplet* tuplet)
+{
+    StickyTuplet sticky;
+    for (const Tuplet* t = tuplet; t; t = t->tuplet()) {
+        sticky.levels.insert(sticky.levels.begin(), Level { t->ratio(), t->baseLen(), t->numberType(), t->bracketType() });
+    }
+    return sticky;
+}
+
+//---------------------------------------------------------
+//   StickyTuplet::startsWith
+//    Whether the tuplet, with the tuplets it is nested in,
+//    matches these levels from the outermost one: the whole
+//    structure, or its outer part
+//---------------------------------------------------------
+
+bool StickyTuplet::startsWith(const Tuplet* tuplet) const
+{
+    std::vector<const Tuplet*> chain;
+    for (const Tuplet* t = tuplet; t; t = t->tuplet()) {
+        chain.insert(chain.begin(), t);
+    }
+    if (chain.empty() || chain.size() > levels.size()) {
+        return false;
+    }
+    for (size_t i = 0; i < chain.size(); ++i) {
+        if (!chain[i]->ratio().identical(levels[i].ratio) || chain[i]->baseLen() != levels[i].baseLen) {
+            return false;
+        }
+    }
+    return true;
+}
+
+//---------------------------------------------------------
+//   tupletToContinue
+//    The tuplet that ends straight before the input position,
+//    or ends together with a tuplet it is nested in (unless the
+//    input position is in another tuplet that doesn't enclose
+//    them), or else the tuplet at the input position
+//---------------------------------------------------------
+
+const Tuplet* InputState::tupletToContinue() const
+{
+    if (!m_segment) {
+        return nullptr;
+    }
+
+    const ChordRest* current = cr();
+    const Tuplet* currentTuplet = current ? current->tuplet() : nullptr;
+
+    const Segment* prevSegment = m_segment->prev1();
+    const ChordRest* prev = prevSegment ? prevSegment->nextChordRest(m_track, /*backwards*/ true) : nullptr;
+    const Tuplet* prevTuplet = prev ? prev->tuplet() : nullptr;
+    for (const Tuplet* t = prevTuplet; t; t = t->tuplet()) {
+        if (t->tuplet() == currentTuplet) {
+            if (t->tick() + t->actualTicks() == tick()) {
+                return prevTuplet;
+            }
+            break;
+        }
+    }
+
+    return currentTuplet;
+}
+
+//---------------------------------------------------------
+//   stickyTupletContinues
+//    Whether sticky tuplet input continues at the input
+//    position: in tuplets of the sticky kind, or straight
+//    after them. Moving elsewhere ends it.
+//---------------------------------------------------------
+
+bool InputState::stickyTupletContinues() const
+{
+    return m_stickyTuplet && m_stickyTuplet->startsWith(tupletToContinue());
+}
+
 void InputState::setVoice(voice_idx_t v)
 {
     const Score* score = m_segment ? m_segment->score() : nullptr;
