@@ -99,19 +99,20 @@ NotationNoteInput::NotationNoteInput(const IGetScore* getScore, INotationInterac
         NoteInputState& is = score()->inputState();
         if (is.stickyTuplet() && !is.stickyTupletContinues()) {
             is.setStickyTuplet(std::nullopt);
+            m_stickyTupletsWereOn = false; // the readout of the new position is enough
             notifyAboutStateChanged();
         }
     });
 
-    // screen readers hear when undo brings a pending tuplet back
+    // screen readers hear when undo brings a pending tuplet back, or a sticky tuplet run starts or stops
     m_stateChanged.onNotify(this, [this]() {
-        announcePendingTupletChange();
+        announceTupletChanges();
     });
     if (m_undoStack) {
         m_undoStack->stackChanged().onNotify(this, [this]() {
             // any later edit forgets the tuplets the last command added
             m_newTuplets.clear();
-            announcePendingTupletChange();
+            announceTupletChanges();
         });
     }
 }
@@ -199,12 +200,19 @@ void NotationNoteInput::startNoteInput(NoteInputMethod method, bool focusNotatio
             startStickyTuplet(tuplet);
         }
     }
+    const bool stickyTupletsStarted = bool(is.stickyTuplet());
+    m_stickyTupletsWereOn = stickyTupletsStarted; // announced below with the input method
 
     notifyAboutNoteInputStarted(focusNotation);
     notifyAboutStateChanged();
 
     m_interaction->showItem(el);
-    accessibilityController()->announce(nameOfNoteInputMethod(method).translated());
+    if (stickyTupletsStarted) {
+        accessibilityController()->announce(muse::mtrc("notation", "%1, sticky tuplets started")
+                                            .arg(nameOfNoteInputMethod(method).translated()));
+    } else {
+        accessibilityController()->announce(nameOfNoteInputMethod(method).translated());
+    }
 }
 
 EngravingItem* NotationNoteInput::resolveNoteInputStartPosition() const
@@ -785,6 +793,7 @@ void NotationNoteInput::setCurrentVoice(voice_idx_t voiceIndex)
     // a voice change ends sticky tuplet input, even if the run could continue back in the old voice
     if (inputState.stickyTuplet()) {
         endStickyTuplets();
+        m_stickyTupletsWereOn = false; // like moving the input position elsewhere
     }
     notifyAboutStateChanged();
 }
@@ -906,12 +915,15 @@ void NotationNoteInput::cancelPendingTuplet()
     const String type = Tuplet::typeUserName(is.pendingTuplet()->ratio.numerator());
     is.setPendingTuplet(std::nullopt);
     m_tupletWasPending = false;
-    if (stickyTupletsOn()) {
-        endStickyTuplets();
-    }
 
     //: %1 is a tuplet type, e.g. "Triplet"
-    accessibilityController()->announce(muse::mtrc("notation", "%1 cancelled").arg(type));
+    String announcement = muse::mtrc("notation", "%1 cancelled").arg(type);
+    if (stickyTupletsOn()) {
+        endStickyTuplets();
+        m_stickyTupletsWereOn = false;
+        announcement += u", " + muse::mtrc("notation", "Sticky tuplets stopped");
+    }
+    accessibilityController()->announce(announcement);
     notifyAboutStateChanged();
 }
 
@@ -931,13 +943,12 @@ void NotationNoteInput::cancelPendingTupletIfMoved()
     }
 }
 
-void NotationNoteInput::announcePendingTupletChange()
+String NotationNoteInput::pendingTupletChange()
 {
     const bool pending = tupletPending();
-    if (pending && !m_tupletWasPending) {
-        accessibilityController()->announce(pendingTupletAnnouncement(*score()->inputState().pendingTuplet()));
-    }
+    const bool changed = pending && !m_tupletWasPending;
     m_tupletWasPending = pending;
+    return changed ? pendingTupletAnnouncement(*score()->inputState().pendingTuplet()) : String();
 }
 
 bool NotationNoteInput::stickyTupletsOn() const
@@ -1012,6 +1023,46 @@ void NotationNoteInput::startStickyTuplet(const Tuplet* tuplet)
     NoteInputState& is = score()->inputState();
     if (is.stickyTupletsAllowed()) {
         is.setStickyTuplet(StickyTuplet::of(tuplet));
+    }
+}
+
+String NotationNoteInput::stickyTupletChange()
+{
+    const bool on = isNoteInputMode() && score()->inputState().stickyTuplet();
+    const bool changed = on != m_stickyTupletsWereOn && isNoteInputMode();
+    m_stickyTupletsWereOn = on;
+    if (!changed) {
+        return String();
+    }
+    return on ? muse::mtrc("notation", "Sticky tuplets started") : muse::mtrc("notation", "Sticky tuplets stopped");
+}
+
+// Where the next sticky tuplet doesn't fit
+String NotationNoteInput::stickyTupletNoSpaceChange()
+{
+    const NoteInputState& is = score()->inputState();
+    const bool noSpace = isNoteInputMode() && !is.pendingTupletHere() && !NoteInput::nextStickyTupletFits(score(), is);
+    const bool changed = noSpace != m_stickyTupletHadNoSpace;
+    m_stickyTupletHadNoSpace = noSpace;
+    return changed && noSpace ? muse::mtrc("notation", "No space for the next sticky tuplet. Press Escape to end sticky tuplets.")
+           : String();
+}
+
+// One announcement, so that a later change doesn't cut off an earlier one
+void NotationNoteInput::announceTupletChanges()
+{
+    String announcement;
+    for (const String& change : { stickyTupletChange(), pendingTupletChange(), stickyTupletNoSpaceChange() }) {
+        if (change.empty()) {
+            continue;
+        }
+        if (!announcement.empty()) {
+            announcement += u", ";
+        }
+        announcement += change;
+    }
+    if (!announcement.empty()) {
+        accessibilityController()->announce(announcement);
     }
 }
 

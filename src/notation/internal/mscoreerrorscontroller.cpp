@@ -48,6 +48,9 @@ void MScoreErrorsController::checkAndShowMScoreError()
         if (err == MsError::NO_SPACE_FOR_TUPLET) {
             accessibilityController()->announce(muse::mtrc("notation", "No space for the tuplet with this duration. "
                                                                        "Choose a shorter duration, or press Escape to cancel it."));
+        } else if (err == MsError::NO_SPACE_FOR_STICKY_TUPLET) {
+            accessibilityController()->announce(muse::mtrc("notation",
+                                                           "No space for the next sticky tuplet. Press Escape to end sticky tuplets."));
         }
         return;
     }

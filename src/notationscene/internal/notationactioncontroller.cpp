@@ -2626,6 +2626,9 @@ void NotationActionController::toggleStickyTuplets()
     if (noteInput && noteInput->isNoteInputMode()) {
         noteInput->setStickyTuplets(on);
     }
+
+    accessibilityController()->announce(on ? muse::mtrc("notation", "Sticky tuplets enabled")
+                                        : muse::mtrc("notation", "Sticky tuplets disabled"));
 }
 
 void NotationActionController::openStaffTextPropertiesDialog()

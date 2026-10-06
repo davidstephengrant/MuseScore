@@ -29,6 +29,7 @@
 
 #include "modularity/ioc.h"
 #include "interactive/iinteractive.h"
+#include "accessibility/iaccessibilitycontroller.h"
 #include "rcommand/commandtypes.h"
 #include "rcommand/icommandsstate.h"
 #include "rcommand/icommanddispatcher.h"
@@ -54,6 +55,7 @@ class NotationActionController : public INotationCommandsController, public muse
     muse::ContextInject<muse::rcommand::ICommandsState> commandsState = { this };
     muse::ContextInject<project::IProjectSession> projectSession = { this };
     muse::ContextInject<muse::IInteractive> interactive = { this };
+    muse::ContextInject<muse::accessibility::IAccessibilityController> accessibilityController = { this };
     muse::ContextInject<playback::IPlaybackController> playbackController = { this };
 
 public:

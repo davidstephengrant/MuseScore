@@ -116,7 +116,7 @@ private:
     bool shouldSetupInputNote() const;
 
     void cancelPendingTupletIfMoved();
-    void announcePendingTupletChange();
+    muse::String pendingTupletChange();
     void setupInputNote();
 
     NoteVal noteValForLine(int line) const;
@@ -127,6 +127,9 @@ private:
     void startStickyTuplet(const mu::engraving::Tuplet* tuplet);
     bool resumeStickyTuplet();
     void endStickyTuplets();
+    muse::String stickyTupletChange();
+    muse::String stickyTupletNoSpaceChange();
+    void announceTupletChanges();
 
     void updateInputState();
     void notifyAboutStateChanged();
@@ -150,6 +153,9 @@ private:
 
     // tuplets the last command added outside note input
     std::vector<const mu::engraving::Tuplet*> m_newTuplets;
+    // a sticky tuplet run was on at the last state change
+    bool m_stickyTupletsWereOn = false;
+    bool m_stickyTupletHadNoSpace = false;
     // the run that turning sticky tuplets off ended, for turning them on again
     std::optional<mu::engraving::StickyTuplet> m_pausedStickyTuplet;
 };
