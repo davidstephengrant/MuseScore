@@ -209,13 +209,15 @@ void InputState::restoreFromUndo(const InputState& state)
 //   setNoteEntryMode
 //    Starting or ending note input, or changing the method,
 //    ends the filling of a tuplet that a waiting tuplet
-//    inserted
+//    inserted. Starting or ending note input also forgets
+//    where continuing tuplet input was stopped.
 //---------------------------------------------------------
 
 void InputState::setNoteEntryMode(bool v)
 {
     if (v != m_noteEntryMode) {
         m_insertedTuplet.reset();
+        m_continuingTupletStoppedIn.reset();
     }
     m_noteEntryMode = v;
 }
@@ -264,6 +266,7 @@ bool InputState::continueTupletsAllowed() const
     case NoteEntryMethod::BY_NOTE_NAME:
     case NoteEntryMethod::BY_DURATION:
     case NoteEntryMethod::RHYTHM:
+    case NoteEntryMethod::TIMEWISE:
         return true;
     default:
         return false;
@@ -309,6 +312,22 @@ bool ContinuingTuplet::startsWith(const Tuplet* tuplet) const
 }
 
 //---------------------------------------------------------
+//   ContinuingTuplet::continuing
+//    The continuing tuplet that follows this tuplet: a paused
+//    run it is the outer part of, with all its levels, or
+//    else the tuplet with the tuplets it is nested in
+//---------------------------------------------------------
+
+ContinuingTuplet ContinuingTuplet::continuing(const Tuplet* tuplet, const std::optional<ContinuingTuplet>& paused)
+{
+    ContinuingTuplet continuing = of(tuplet);
+    if (paused && paused->levels.size() > continuing.levels.size() && paused->startsWith(tuplet)) {
+        return *paused;
+    }
+    return continuing;
+}
+
+//---------------------------------------------------------
 //   tupletToContinue
 //    The tuplet that ends straight before the input position,
 //    or ends together with a tuplet it is nested in (unless the
@@ -343,13 +362,85 @@ const Tuplet* InputState::tupletToContinue() const
 //---------------------------------------------------------
 //   continuingTupletGoesOn
 //    Whether continuing tuplet input goes on at the input
-//    position: in tuplets of its kind, or straight
-//    after them. Moving elsewhere ends it.
+//    position: in tuplets of its kind, straight after
+//    them, or where it was resumed. Moving elsewhere ends it.
 //---------------------------------------------------------
 
 bool InputState::continuingTupletGoesOn() const
 {
-    return m_continuingTuplet && m_continuingTuplet->startsWith(tupletToContinue());
+    if (!m_continuingTuplet) {
+        return false;
+    }
+    if (m_continuingTupletResumedAt && m_continuingTupletResumedAt->tick == tick() && m_continuingTupletResumedAt->track == m_track
+        && m_continuingTupletResumedAt->beyondScore == m_beyondScore) {
+        return true;
+    }
+    return m_continuingTuplet->startsWith(tupletToContinue());
+}
+
+//---------------------------------------------------------
+//   resumeContinuingTuplet
+//    Continuing tuplet input with this tuplet, which continues at
+//    the input position as if straight after one of them
+//---------------------------------------------------------
+
+void InputState::resumeContinuingTuplet(const ContinuingTuplet& t)
+{
+    setContinuingTuplet(t);
+    m_continuingTupletResumedAt = ResumedAt { tick(), m_track, m_beyondScore };
+}
+
+void InputState::setContinuingTuplet(const std::optional<ContinuingTuplet>& t)
+{
+    m_continuingTuplet = t;
+    m_continuingTupletResumedAt.reset();
+    if (t) {
+        m_continuingTupletStoppedIn.reset();
+    }
+}
+
+static const Tuplet* outermostTuplet(const ChordRest* cr)
+{
+    const Tuplet* tuplet = cr ? cr->tuplet() : nullptr;
+    while (tuplet && tuplet->tuplet()) {
+        tuplet = tuplet->tuplet();
+    }
+    return tuplet;
+}
+
+//---------------------------------------------------------
+//   stopContinuingTuplet
+//    End continuing tuplet input. Inside a tuplet, no run starts
+//    again until the input position leaves it.
+//---------------------------------------------------------
+
+void InputState::stopContinuingTuplet()
+{
+    setContinuingTuplet(std::nullopt);
+    const Tuplet* tuplet = m_beyondScore ? nullptr : outermostTuplet(cr());
+    m_continuingTupletStoppedIn = tuplet ? std::make_optional(std::make_pair(tuplet->tick(), tuplet->track())) : std::nullopt;
+}
+
+//---------------------------------------------------------
+//   startContinuingTupletInside
+//    Start continuing tuplet input with the tuplet the input
+//    position is in, with the tuplets it is nested in, unless
+//    it is on already or was stopped in that tuplet
+//---------------------------------------------------------
+
+bool InputState::startContinuingTupletInside()
+{
+    const ChordRest* current = m_beyondScore ? nullptr : cr();
+    const Tuplet* outermost = outermostTuplet(current);
+    if (m_continuingTupletStoppedIn
+        && (!outermost || *m_continuingTupletStoppedIn != std::make_pair(outermost->tick(), outermost->track()))) {
+        m_continuingTupletStoppedIn.reset();
+    }
+    if (m_continuingTuplet || !outermost || m_continuingTupletStoppedIn || !continueTupletsAllowed()) {
+        return false;
+    }
+    setContinuingTuplet(ContinuingTuplet::of(current->tuplet()));
+    return true;
 }
 
 void InputState::setVoice(voice_idx_t v)

@@ -448,9 +448,22 @@ Note* NoteInput::addPitch(Transaction& tx, Score* score, NoteVal& nval, bool add
         return nullptr;
     }
 
+    // a drum in another voice ends continuing tuplet input, as a voice change does
+    if (noteTrack != is.track()) {
+        is.setContinuingTuplet(std::nullopt);
+    }
+
+    // in Insert input, the next continuing tuplet's time is inserted first, as for a letter
+    if (!externalInputState && is.usingNoteEntryMethod(NoteEntryMethod::TIMEWISE) && continuingTupletInsertsHere(is)
+        && !insertContinuingTuplets(tx, score, is)) {
+        return nullptr;
+    }
+
     // in the tuplet that a waiting tuplet inserted, no longer than the time left in it
     const Fraction inputDuration = is.usingNoteEntryMethod(NoteEntryMethod::TIMEWISE) ? insertedTupletDuration(is, is.duration().fraction())
                                    : is.duration().fraction();
+
+    endContinuingTupletsIfNoRoom(score, is, inputDuration);
 
     if (is.beyondScore()) {
         score->appendMeasures(1);
@@ -500,6 +513,8 @@ Note* NoteInput::addPitch(Transaction& tx, Score* score, NoteVal& nval, bool add
     } else {
         duration = inputDuration;
     }
+    addContinuingTuplets(tx, score, is, duration);
+
     Note* note = nullptr;
     Note* lastTiedNote = nullptr;
     if (is.usingNoteEntryMethod(NoteEntryMethod::REPITCH) && is.cr()->isChord()) {
@@ -987,9 +1002,17 @@ Ret NoteInput::putNote(Transaction& tx, Score* score, const Position& p, bool re
             is = inputStateBefore;
             return make_ret(Ret::Code::UnknownError);
         }
+        // in Insert input, the next continuing tuplet's time is inserted first, as for a letter (e.g. a tablature fret)
+        if (!insert && is.usingNoteEntryMethod(NoteEntryMethod::TIMEWISE) && continuingTupletInsertsHere(is)
+            && !insertContinuingTuplets(tx, score, is)) {
+            is = inputStateBefore;
+            return make_ret(Ret::Code::UnknownError);
+        }
         const Fraction inputDuration = is.duration().fraction();
         const Fraction duration = insert || is.usingNoteEntryMethod(NoteEntryMethod::TIMEWISE) ? insertedTupletDuration(is, inputDuration)
                                   : inputDuration;
+        endContinuingTupletsIfNoRoom(score, is, duration);
+        addContinuingTuplets(tx, score, is, duration);
         Segment* seg = score->setNoteRest(is.segment(), is.track(), nval,
                                           duration, stemDirection, forceAccidental, is.articulationIds());
         if (!seg) {
@@ -1099,6 +1122,18 @@ Ret NoteInput::repitchNote(Transaction& tx, Score* score, const Position& p, boo
 //   insertChordByInsertingTime
 //---------------------------------------------------------
 
+// Whether a note inserted at `pos` inserts the next continuing tuplet's time, as at the input position
+static bool continuingTupletInsertsAt(const InputState& is, Segment* seg, const Position& pos)
+{
+    if (pos.beyondScore) {
+        return false;
+    }
+    InputState at = is;
+    at.setTrack(pos.staffIdx * VOICES + is.voice());
+    at.setSegment(seg);
+    return NoteInput::continuingTupletInsertsHere(at);
+}
+
 Ret NoteInput::insertChordByInsertingTime(Transaction& tx, Score* score, const Position& pos)
 {
     // insert by increasing measure length
@@ -1134,6 +1169,14 @@ Ret NoteInput::insertChordByInsertingTime(Transaction& tx, Score* score, const P
         p.segment = is.segment();
         // the tuplet's measure is already there
         p.beyondScore = false;
+    } else if (continuingTupletInsertsAt(is, seg, pos)) {
+        // so does a continuing tuplet where its run goes on
+        is.setTrack(pos.staffIdx * VOICES + is.voice());
+        is.setSegment(seg);
+        if (!insertContinuingTuplets(tx, score, is)) {
+            return make_ret(Ret::Code::UnknownError);
+        }
+        p.segment = is.segment();
     } else {
         p.segment = insertTime(tx, score, seg, is.duration().fraction());
         is.setInsertedTuplet(nullptr);
@@ -1285,6 +1328,244 @@ bool NoteInput::insertSplitsTuplet(const Segment* segment)
         }
     }
     return false;
+}
+
+//---------------------------------------------------------
+//   addContinuingTuplets
+//    With a continuing tuplet, make sure that the time a note or
+//    rest of this duration takes from the input position is in
+//    tuplets, creating them where there are none yet. A nested
+//    continuing tuplet is created with the tuplets it is nested in.
+//    Callers check continuingTupletsFit first.
+//---------------------------------------------------------
+
+void NoteInput::addContinuingTuplets(Transaction&, Score* score, InputState& is, const Fraction& duration)
+{
+    if (!is.continuingTuplet() || !is.continueTupletsAllowed() || !is.segment()) {
+        return;
+    }
+
+    if (!is.continuingTupletGoesOn()) {
+        is.setContinuingTuplet(std::nullopt);
+        return;
+    }
+
+    const ContinuingTuplet continuing = *is.continuingTuplet();
+    const track_idx_t track = is.track();
+    const Fraction inputTick = is.tick();
+    Fraction tick = inputTick;
+    Fraction remaining = duration;
+
+    while (remaining.isNotZero()) {
+        if (tick >= score->endTick()) {
+            score->appendMeasures(1);
+        }
+        Segment* segment = score->tick2segment(tick, true, SegmentType::ChordRest);
+        if (!segment) {
+            break;
+        }
+        // remove a measure repeat first, like entering a note there does; a tuplet can't replace it
+        Measure* measure = segment->measure();
+        const staff_idx_t staffIdx = track2staff(track);
+        if (measure->isMeasureRepeatGroup(staffIdx)) {
+            score->deleteItem(measure->measureRepeatElement(staffIdx));
+            segment = score->tick2segment(tick, true, SegmentType::ChordRest);
+            if (!segment) {
+                break;
+            }
+        }
+        score->expandVoice(segment, track);
+        ChordRest* cr = segment->cr(track);
+        if (!cr) {
+            break;
+        }
+
+        // create the levels of the continuing tuplet that aren't here yet, from the outermost one in
+        Tuplet* tuplet = cr->tuplet();
+        if (!tuplet || continuing.startsWith(tuplet)) {
+            size_t level = 0;
+            for (const Tuplet* t = tuplet; t; t = t->tuplet()) {
+                ++level;
+            }
+            for (; level < continuing.levels.size() && cr; ++level) {
+                const ContinuingTuplet::Level& l = continuing.levels[level];
+                // addTuplet would show a warning if it can't add the tuplet
+                tuplet = score->canAddTuplet(cr, l.ratio, l.baseLen)
+                         ? score->addTuplet(cr, l.ratio, l.baseLen, l.numberType, l.bracketType) : nullptr;
+                if (!tuplet) {
+                    break;
+                }
+                // the new tuplet replaces the chord or rest here
+                Segment* s = score->tick2segment(tick, true, SegmentType::ChordRest);
+                cr = s ? s->cr(track) : nullptr;
+            }
+            if (level < continuing.levels.size() || !tuplet || !cr) {
+                is.setContinuingTuplet(std::nullopt);
+                break;
+            }
+        }
+
+        // a longer note or rest continues in the next tuplet
+        const Fraction tupletEnd = tuplet->tick() + tuplet->actualTicks();
+        const Fraction left = (tupletEnd - tick) / actualTicks(Fraction(1, 1), tuplet, cr->staff()->timeStretch(tick));
+        if (remaining <= left) {
+            break;
+        }
+        remaining -= left;
+        tick = tupletEnd;
+    }
+
+    // creating a tuplet on a measure rest replaces the segment at the input position, and addTuplet can
+    // reselect the selection, which moves the input position to its voice
+    is.setTrack(track);
+    is.setSegment(score->tick2segment(inputTick, false, SegmentType::ChordRest));
+}
+
+//---------------------------------------------------------
+//   continuingTupletInsertsHere
+//    Whether inserting at the input position inserts the time
+//    of the next continuing tuplet: where continuing tuplet input goes
+//    on, outside the tuplet being filled and not inside
+//    another tuplet
+//---------------------------------------------------------
+
+bool NoteInput::continuingTupletInsertsHere(const InputState& is)
+{
+    return !is.beyondScore() && is.segment() && !is.segment()->splitsTuplet() && !is.inInsertedTuplet(is.cr())
+           && is.continuingTuplet() && is.continueTupletsAllowed() && is.continuingTupletGoesOn();
+}
+
+//---------------------------------------------------------
+//   insertContinuingTuplets
+//    Where continuingTupletInsertsHere, insert the time of the
+//    next continuing tuplet at the input position and create it
+//    there at once, as for a note of its innermost note value.
+//    The next notes and rests fill it, like a tuplet that a
+//    waiting tuplet inserted. False if inserting time there
+//    would split a tuplet in any track: then nothing is
+//    entered.
+//---------------------------------------------------------
+
+bool NoteInput::insertContinuingTuplets(Transaction& tx, Score* score, InputState& is)
+{
+    if (insertSplitsTuplet(is.segment())) {
+        MScore::setError(MsError::CANNOT_INSERT_TUPLET);
+        return false;
+    }
+
+    const ContinuingTuplet continuing = *is.continuingTuplet();
+    const ContinuingTuplet::Level& outermost = continuing.levels.front();
+    is.setSegment(insertTime(tx, score, is.segment(), outermost.baseLen.fraction() * outermost.ratio.denominator()));
+    addContinuingTuplets(tx, score, is, continuing.levels.back().baseLen.fraction());
+    const Tuplet* tuplet = is.cr() ? is.cr()->tuplet() : nullptr;
+    while (tuplet && tuplet->tuplet()) {
+        tuplet = tuplet->tuplet();
+    }
+    is.setInsertedTuplet(tuplet);
+    return true;
+}
+
+//---------------------------------------------------------
+//   continuingTupletsFit
+//    Whether the continuing tuplets that a note or rest of this
+//    duration needs from the input position fit, like
+//    addContinuingTuplets creates them. A zero duration checks
+//    only the tuplets at the input position.
+//---------------------------------------------------------
+
+bool NoteInput::continuingTupletsFit(const Score* score, const InputState& is, const Fraction& duration)
+{
+    if (!is.continuingTuplet() || !is.continueTupletsAllowed() || !is.segment() || !is.continuingTupletGoesOn()) {
+        return true;
+    }
+
+    const ContinuingTuplet& continuing = *is.continuingTuplet();
+    const Staff* staff = is.track() != muse::nidx ? score->staff(track2staff(is.track())) : nullptr;
+    const Measure* last = score->lastMeasure();
+    if (!staff || !last) {
+        return true;
+    }
+
+    Fraction tick = is.beyondScore() ? score->endTick() : is.tick();
+    Fraction remaining = duration;
+
+    while (true) {
+        Tuplet* tuplet = nullptr;
+        Fraction limit;
+        Fraction timeStretch(1, 1);
+        if (tick >= score->endTick()) {
+            // new measures like the last one
+            const Fraction measures = (tick - score->endTick()) / last->ticks();
+            limit = score->endTick() + last->ticks() * Fraction(measures.numerator() / measures.denominator() + 1, 1);
+        } else {
+            const Segment* segment = score->tick2segment(tick, true, SegmentType::ChordRest);
+            if (!segment) {
+                return true;
+            }
+            const ChordRest* cr = segment->cr(is.track());
+            tuplet = cr ? cr->tuplet() : nullptr;
+            limit = tuplet ? tuplet->tick() + tuplet->actualTicks() : segment->measure()->endTick();
+            timeStretch = staff->timeStretch(tick);
+        }
+
+        // the innermost tuplet here, or the time it would take once the missing levels are created
+        Fraction factor = actualTicks(Fraction(1, 1), tuplet, timeStretch);
+        Fraction tupletEnd = limit;
+        if (!tuplet || continuing.startsWith(tuplet)) {
+            size_t level = 0;
+            for (const Tuplet* t = tuplet; t; t = t->tuplet()) {
+                ++level;
+            }
+            for (; level < continuing.levels.size(); ++level) {
+                const ContinuingTuplet::Level& l = continuing.levels[level];
+                const Fraction ticks = l.baseLen.fraction() * l.ratio.denominator() * factor;
+                if (tick + ticks > tupletEnd) {
+                    return false;
+                }
+                tupletEnd = tick + ticks;
+                factor /= l.ratio;
+            }
+        }
+
+        // a longer note or rest continues in the next tuplet
+        const Fraction left = (tupletEnd - tick) / factor;
+        if (remaining <= left) {
+            break;
+        }
+        remaining -= left;
+        tick = tupletEnd;
+    }
+
+    return true;
+}
+
+//---------------------------------------------------------
+//   endContinuingTupletsIfNoRoom
+//    Where the continuing tuplets that a note or rest of this
+//    duration needs don't fit, continuing tuplet input ends and
+//    the note or rest goes in as an ordinary one
+//---------------------------------------------------------
+
+void NoteInput::endContinuingTupletsIfNoRoom(const Score* score, InputState& is, const Fraction& duration)
+{
+    if (!continuingTupletsFit(score, is, duration)) {
+        is.stopContinuingTuplet();
+    }
+}
+
+//---------------------------------------------------------
+//   nextContinuingTupletFits
+//    Whether the continuing tuplets that the next note or rest
+//    creates at the input position fit
+//---------------------------------------------------------
+
+bool NoteInput::nextContinuingTupletFits(const Score* score, const InputState& is)
+{
+    // in Insert input, its time is inserted, unless that would split a tuplet
+    if (is.usingNoteEntryMethod(NoteEntryMethod::TIMEWISE) && continuingTupletInsertsHere(is)) {
+        return !insertSplitsTuplet(is.segment());
+    }
+    return continuingTupletsFit(score, is, Fraction(0, 1));
 }
 
 //---------------------------------------------------------
@@ -1578,6 +1859,68 @@ static bool nestedPendingTupletsFit(const PendingTuplet& pending, const Fraction
 }
 
 //---------------------------------------------------------
+//   pendingTupletInContinuingTuplet
+//    At a continuing tuplet run's boundary, a waiting tuplet that
+//    `duration` sizes shorter than the continuing tuplet's note
+//    value nests in the next continuing tuplet, as it would one
+//    note earlier: `pending` inside the levels of the continuing
+//    tuplet that aren't there yet. Otherwise it replaces the
+//    continuing tuplet: nothing. Only in By note name input.
+//---------------------------------------------------------
+
+static std::optional<PendingTuplet> pendingTupletInContinuingTuplet(const Score* score, const PendingTuplet& pending,
+                                                                    const TDuration& duration)
+{
+    const InputState& is = score->inputState();
+    if (!is.usingNoteEntryMethod(NoteEntryMethod::BY_NOTE_NAME) || !is.continuingTuplet() || !is.continueTupletsAllowed()
+        || !is.continuingTupletGoesOn() || !NoteInput::nextContinuingTupletFits(score, is)) {
+        return std::nullopt;
+    }
+
+    const ContinuingTuplet& continuing = *is.continuingTuplet();
+    if (duration.fraction() >= continuing.levels.back().baseLen.fraction()) {
+        return std::nullopt;
+    }
+
+    // like addContinuingTuplets: the levels that aren't here yet, from the outermost one in
+    const ChordRest* cr = is.beyondScore() ? nullptr : is.cr();
+    const Tuplet* parent = cr ? cr->tuplet() : nullptr;
+    size_t level = 0;
+    for (const Tuplet* t = parent; t; t = t->tuplet()) {
+        ++level;
+    }
+    if (level >= continuing.levels.size()) {
+        return std::nullopt;
+    }
+
+    std::vector<PendingTuplet> levels;
+    for (; level < continuing.levels.size(); ++level) {
+        const ContinuingTuplet::Level& l = continuing.levels[level];
+        PendingTuplet p;
+        p.ratio = l.ratio;
+        p.numberType = l.numberType;
+        p.bracketType = l.bracketType;
+        p.durationAsSubdivision = true;
+        p.duration = l.baseLen;
+        levels.push_back(p);
+    }
+    PendingTuplet inner = pending;
+    inner.duration = duration;
+    inner.nested.clear();
+    levels.push_back(inner);
+    levels.insert(levels.end(), pending.nested.begin(), pending.nested.end());
+
+    PendingTuplet outer = levels.front();
+    outer.nested.assign(levels.begin() + 1, levels.end());
+    outer.continuing = pending.continuing;
+    outer.number = pending.number;
+    outer.tick = pending.tick;
+    outer.track = pending.track;
+    outer.beyondScore = pending.beyondScore;
+    return outer;
+}
+
+//---------------------------------------------------------
 //   pendingTupletFits
 //    Whether the tuplet waiting at the input position fits
 //    there when `duration` sizes it, with the tuplets nested
@@ -1589,10 +1932,16 @@ static bool nestedPendingTupletsFit(const PendingTuplet& pending, const Fraction
 static bool pendingTupletFits(const Score* score, const TDuration& duration, bool withNested = true)
 {
     const InputState& is = score->inputState();
+    PendingTuplet own = *is.pendingTuplet();
+    if (!withNested) {
+        own.nested.clear();
+    }
+    const std::optional<PendingTuplet> inContinuing = pendingTupletInContinuingTuplet(score, own, duration);
+    const PendingTuplet& pending = inContinuing ? *inContinuing : own;
     Fraction ratio;
     TDuration baseLen;
-    if (!pendingTupletShape(*is.pendingTuplet(), duration, ratio, baseLen)
-        || (withNested && !nestedPendingTupletsFit(*is.pendingTuplet(), baseLen.fraction() * ratio.numerator()))) {
+    if (!pendingTupletShape(pending, inContinuing ? *inContinuing->duration : duration, ratio, baseLen)
+        || !nestedPendingTupletsFit(pending, baseLen.fraction() * ratio.numerator())) {
         return false;
     }
 
@@ -1778,12 +2127,12 @@ std::optional<TupletPreview> NoteInput::tupletPreview(const Score* score)
         timeStretch = staff->timeStretch(preview.tick);
     }
 
-    const PendingTuplet& pending = *is.pendingTuplet();
+    const PendingTuplet pending = pendingTupletAsAdded(score);
     const TDuration duration = pendingTupletDuration(is);
     TupletPreview::Level level;
     TDuration baseLen;
     // in By duration and Rhythm input, as if the input duration sized it
-    if (!pendingTupletShape(pending, duration, level.ratio, baseLen)) {
+    if (!pendingTupletShape(pending, pending.duration.value_or(duration), level.ratio, baseLen)) {
         return std::nullopt;
     }
     level.numberType = pending.numberType;
@@ -1825,11 +2174,15 @@ static bool addPendingTuplet(Transaction& tx, Score* score, bool insertTime)
         return true;
     }
 
-    const PendingTuplet pending = *is.pendingTuplet();
     const TDuration duration = pendingTupletDuration(is);
+    const bool sizedNow = !is.pendingTuplet()->duration;
+    // at a continuing tuplet run's boundary, maybe nested in the next continuing tuplet
+    const std::optional<PendingTuplet> inContinuing = pendingTupletInContinuingTuplet(score, *is.pendingTuplet(), duration);
+    const PendingTuplet pending = inContinuing.value_or(*is.pendingTuplet());
     Fraction ratio;
     TDuration baseLen;
-    if (!pendingTupletShape(pending, duration, ratio, baseLen) || !pendingTupletFits(score, duration)) {
+    if (!pendingTupletShape(pending, inContinuing ? *inContinuing->duration : duration, ratio, baseLen)
+        || !pendingTupletFits(score, duration)) {
         return false;
     }
 
@@ -1874,11 +2227,31 @@ static bool addPendingTuplet(Transaction& tx, Score* score, bool insertTime)
     if (insertTime) {
         is.setInsertedTuplet(outer);
     }
+    if (pending.continuing && is.continueTupletsAllowed()) {
+        is.setContinuingTuplet(ContinuingTuplet::of(tuplet));
+    }
     is.setSegment(toChordRest(tuplet->elements().front())->segment());
-    if (!pending.duration) {
+    if (sizedNow) {
         is.setDuration(baseLen);
     }
     return true;
+}
+
+//---------------------------------------------------------
+//   pendingTupletAsAdded
+//    The tuplet waiting at the input position, sized in By
+//    note name and Insert input, as the next note or rest
+//    adds it: at a continuing tuplet run's boundary, maybe nested
+//    in the next continuing tuplet
+//---------------------------------------------------------
+
+PendingTuplet NoteInput::pendingTupletAsAdded(const Score* score)
+{
+    const PendingTuplet& pending = *score->inputState().pendingTuplet();
+    if (!pending.duration) {
+        return pending;
+    }
+    return pendingTupletInContinuingTuplet(score, pending, *pending.duration).value_or(pending);
 }
 
 //---------------------------------------------------------
@@ -1952,8 +2325,16 @@ void NoteInput::setDuration(Transaction& tx, Score* score, DurationType duration
                 return;
             }
 
+            // a drum in another voice ends continuing tuplet input, as a voice change does
+            if (drumInOtherVoice(is)) {
+                is.setContinuingTuplet(std::nullopt);
+            }
+
+            endContinuingTupletsIfNoRoom(score, is, is.duration().fraction());
+
             if (is.rest()) {
                 // Enter a rest
+                addContinuingTuplets(tx, score, is, is.duration().fraction());
                 score->setNoteRest(is.segment(), is.track(), NoteVal(), is.duration().fraction());
                 is.moveToNextInputPos();
             } else {
@@ -1968,10 +2349,13 @@ void NoteInput::setDuration(Transaction& tx, Score* score, DurationType duration
                     score->appendMeasures(1);
                     is.moveToNextInputPos();
                 }
+                // a new continuing tuplet replaces the chord here, so the note isn't added to that chord
+                const ChordRest* oldCr = is.cr();
+                addContinuingTuplets(tx, score, is, is.duration().fraction());
                 ChordRest* cr = is.cr();
                 Chord* chord = nullptr;
 
-                if (cr && cr->isChord() && cr->durationType() == is.duration()) {
+                if (cr && cr == oldCr && cr->isChord() && cr->durationType() == is.duration()) {
                     chord = toChord(cr);
                 }
 

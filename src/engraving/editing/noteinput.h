@@ -112,7 +112,13 @@ public:
     static bool insertSplitsTuplet(const Segment* segment);
 
     static void truncateChordRest(Transaction& tx, Score* score, ChordRest* cr, const Fraction& tick, bool fillWithRest);
+    static void addContinuingTuplets(Transaction& tx, Score* score, InputState& is, const Fraction& duration);
+    static bool continuingTupletInsertsHere(const InputState& is);
+    static bool insertContinuingTuplets(Transaction& tx, Score* score, InputState& is);
     static Fraction insertedTupletDuration(const InputState& is, const Fraction& duration);
+    static bool continuingTupletsFit(const Score* score, const InputState& is, const Fraction& duration);
+    static void endContinuingTupletsIfNoRoom(const Score* score, InputState& is, const Fraction& duration);
+    static bool nextContinuingTupletFits(const Score* score, const InputState& is);
 
     static void nextInputPos(Transaction& tx, Score* score, const ChordRest* cr, bool doSelect);
 
@@ -127,6 +133,7 @@ public:
     static void cancelPendingTuplet(Score* score);
     static bool pendingTupletFitsHere(const Score* score);
     static bool addPendingTupletForNote(Transaction& tx, Score* score, track_idx_t track, bool insertTime = false);
+    static PendingTuplet pendingTupletAsAdded(const Score* score);
     static std::optional<TupletPreview> tupletPreview(const Score* score);
     static void toggleRest(Transaction& tx, Score* score);
     static void toggleDots(Transaction& tx, Score* score, int dots, bool toggleForSelectionOnly = false);

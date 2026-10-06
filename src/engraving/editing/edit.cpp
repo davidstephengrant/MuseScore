@@ -2751,8 +2751,16 @@ void Score::enterRest(const TDuration& d, InputState* externalInputState)
         return;
     }
 
+    // in Insert input, the next continuing tuplet's time is inserted first, as for a note
+    if (!externalInputState && is.usingNoteEntryMethod(NoteEntryMethod::TIMEWISE) && NoteInput::continuingTupletInsertsHere(is)
+        && !NoteInput::insertContinuingTuplets(transactionManager()->currentOrDummyTransaction(), this, is)) {
+        return;
+    }
+
     // in the tuplet that a waiting tuplet inserted, no longer than the time left in it
     const Fraction duration = NoteInput::insertedTupletDuration(is, d.fraction());
+
+    NoteInput::endContinuingTupletsIfNoRoom(this, is, duration);
 
     if (is.beyondScore()) {
         appendMeasures(1);
@@ -2765,6 +2773,8 @@ void Score::enterRest(const TDuration& d, InputState* externalInputState)
         LOGD("cannot enter rest here");
         return;
     }
+
+    NoteInput::addContinuingTuplets(transactionManager()->currentOrDummyTransaction(), this, is, duration);
 
     const track_idx_t track = is.track();
     NoteVal nval;

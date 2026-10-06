@@ -82,6 +82,8 @@ struct PendingTuplet {
     // By note name: the tuplets waiting inside it, from the outermost in, each in the first note of the one
     // before; only their options and duration are used
     std::vector<PendingTuplet> nested;
+    // the tuplet starts continuing tuplet input when it is added
+    bool continuing = false;
     // given when it starts waiting, see InputState::forgetPendingTuplets()
     int number = 0;
 
@@ -108,6 +110,7 @@ struct ContinuingTuplet {
     std::vector<Level> levels;
 
     static ContinuingTuplet of(const Tuplet* tuplet);
+    static ContinuingTuplet continuing(const Tuplet* tuplet, const std::optional<ContinuingTuplet>& paused);
     bool startsWith(const Tuplet* tuplet) const;
 };
 
@@ -193,7 +196,10 @@ public:
     bool inInsertedTuplet(const ChordRest* cr) const;
 
     const std::optional<ContinuingTuplet>& continuingTuplet() const { return m_continuingTuplet; }
-    void setContinuingTuplet(const std::optional<ContinuingTuplet>& t) { m_continuingTuplet = t; }
+    void setContinuingTuplet(const std::optional<ContinuingTuplet>& t);
+    void resumeContinuingTuplet(const ContinuingTuplet& t);
+    void stopContinuingTuplet();
+    bool startContinuingTupletInside();
     bool continueTupletsAllowed() const;
     const Tuplet* tupletToContinue() const;
     bool continuingTupletGoesOn() const;
@@ -244,6 +250,15 @@ private:
     // Insert: where the tuplet that a waiting tuplet inserted starts
     std::optional<std::pair<Fraction, track_idx_t> > m_insertedTuplet;
     std::optional<ContinuingTuplet> m_continuingTuplet;
+    // where continuing tuplet input was turned on again away from a tuplet of its kind
+    struct ResumedAt {
+        Fraction tick;
+        track_idx_t track = muse::nidx;
+        bool beyondScore = false;
+    };
+    std::optional<ResumedAt> m_continuingTupletResumedAt;
+    // where continuing tuplet input was stopped inside a tuplet: where the outermost one starts
+    std::optional<std::pair<Fraction, track_idx_t> > m_continuingTupletStoppedIn;
 
     // kept through undo and redo: the last number given to a waiting tuplet, and the last one cancelled
     int m_pendingTupletNumber = 0;
