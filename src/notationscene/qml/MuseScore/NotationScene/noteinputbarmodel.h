@@ -32,6 +32,7 @@
 #include "project/iprojectsession.h"
 #include "ui/iuistate.h"
 #include "notationscene/inotationcommandscontroller.h"
+#include "notation/inotationconfiguration.h"
 
 namespace mu::notation {
 class NoteInputBarModel : public muse::uicomponents::AbstractMenuModel, public QQmlParserStatus
@@ -43,6 +44,7 @@ class NoteInputBarModel : public muse::uicomponents::AbstractMenuModel, public Q
     Q_PROPERTY(bool isInputAllowed READ isInputAllowed NOTIFY isInputAllowedChanged)
 
     muse::GlobalInject<muse::rcommand::ICommandsRegister> commandsRegister;
+    muse::GlobalInject<INotationConfiguration> notationConfiguration;
     muse::ContextInject<muse::ui::IUiState> uiState = { this };
     muse::ContextInject<project::IProjectSession> context = { this };
     muse::ContextInject<INotationCommandsController> commandsController = { this };
@@ -87,6 +89,7 @@ private:
     muse::uicomponents::MenuItemList makeCrossStaffBeamingItems();
     muse::uicomponents::MenuItemList makeTupletItems();
     void updateTupletItemChecked();
+    void updateTupletItemIcon();
     muse::uicomponents::MenuItemList makeAddItems();
     muse::uicomponents::MenuItemList makeNotesItems();
     muse::uicomponents::MenuItemList makeIntervalsItems();

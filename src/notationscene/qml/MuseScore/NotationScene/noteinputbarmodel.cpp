@@ -90,7 +90,12 @@ void NoteInputBarModel::init()
         emit isInputAllowedChanged();
     });
 
-    // the tuplet button is highlighted while a tuplet is pending; undo can bring one back
+    // only the icon changes: rebuilt items wouldn't show the current command states
+    notationConfiguration()->stickyTupletInputChanged().onNotify(this, [this]() {
+        updateTupletItemIcon();
+    });
+
+    // the tuplet button is highlighted while a tuplet is pending or sticky tuplet input is on; undo can bring either back
     commandsController()->noteInputStateChanged().onNotify(this, [this]() {
         updateTupletItemChecked();
     });
@@ -189,6 +194,7 @@ void NoteInputBarModel::load()
             item->setSubitems(makeTupletItems());
             m_tupletItem = item;
             updateTupletItemChecked();
+            updateTupletItemIcon();
             items << item;
         } else {
             MenuItem* item = makeCommandItem(rcommand::Command(citem.intent), QString::number(section));
@@ -203,8 +209,19 @@ void NoteInputBarModel::load()
 void NoteInputBarModel::updateTupletItemChecked()
 {
     if (m_tupletItem) {
-        m_tupletItem->setChecked(commandsController()->tupletPending());
+        m_tupletItem->setChecked(commandsController()->tupletPending() || commandsController()->stickyTupletsOn());
     }
+}
+
+void NoteInputBarModel::updateTupletItemIcon()
+{
+    if (!m_tupletItem) {
+        return;
+    }
+
+    m_tupletItem->setIcon(notationConfiguration()->stickyTupletInput()
+                          ? IconCode::Code::LOOP // TODO: placeholder for a sticky tuplets icon
+                          : serviceItemInfo(TUPLET_SUBITEMS).icon);
 }
 
 bool NoteInputBarModel::isInputAllowed() const

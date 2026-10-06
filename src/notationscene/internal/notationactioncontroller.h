@@ -91,6 +91,7 @@ public:
     engraving::DurationType currentDurationType() const override;
     int currentDotCount() const override;
     bool tupletPending() const override;
+    bool stickyTupletsOn() const override;
     bool currentIsRest() const override;
     engraving::AccidentalType currentAccidentalType() const override;
     std::set<engraving::SymId> currentArticulations() const override;

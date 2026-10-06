@@ -1181,6 +1181,12 @@ bool NotationActionController::tupletPending() const
     return noteInput && noteInput->tupletPending();
 }
 
+bool NotationActionController::stickyTupletsOn() const
+{
+    INotationNoteInputPtr noteInput = currentNotationNoteInput();
+    return noteInput && noteInput->stickyTupletsOn();
+}
+
 bool NotationActionController::currentIsRest() const
 {
     INotationInteractionPtr interaction = currentNotationInteraction();
