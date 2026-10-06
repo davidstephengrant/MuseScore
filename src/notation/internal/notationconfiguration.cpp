@@ -865,6 +865,26 @@ muse::async::Notification NotationConfiguration::tupletCommandsSelectedDurationA
     return m_tupletCommandsSelectedDurationAsChanged;
 }
 
+bool NotationConfiguration::continuingTupletInput() const
+{
+    return m_continuingTupletInput;
+}
+
+void NotationConfiguration::setContinuingTupletInput(bool continuing)
+{
+    if (m_continuingTupletInput == continuing) {
+        return;
+    }
+
+    m_continuingTupletInput = continuing;
+    m_continuingTupletInputChanged.notify();
+}
+
+muse::async::Notification NotationConfiguration::continuingTupletInputChanged() const
+{
+    return m_continuingTupletInputChanged;
+}
+
 bool NotationConfiguration::isMidiInputEnabled() const
 {
     return settings()->value(IS_MIDI_INPUT_ENABLED).toBool();

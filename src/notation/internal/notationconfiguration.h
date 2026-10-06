@@ -157,6 +157,10 @@ public:
     void setTupletCommandsSelectedDurationAs(engraving::TupletSelectedDuration selectedDurationAs) override;
     muse::async::Notification tupletCommandsSelectedDurationAsChanged() const override;
 
+    bool continuingTupletInput() const override;
+    void setContinuingTupletInput(bool continuing) override;
+    muse::async::Notification continuingTupletInputChanged() const override;
+
     muse::io::path_t userMusicFontsPath() const override;
     void setUserMusicFontsPath(const muse::io::path_t& path) override;
     muse::async::Channel<muse::io::path_t> userMusicFontsPathChanged() const override;
@@ -259,6 +263,7 @@ private:
     muse::async::Notification m_defaultNoteInputMethodChanged;
     muse::async::Notification m_addAccidentalDotsArticulationsToNextNoteEnteredChanged;
     muse::async::Notification m_tupletCommandsSelectedDurationAsChanged;
+    muse::async::Notification m_continuingTupletInputChanged;
     muse::async::Notification m_useNoteInputCursorInInputByDurationChanged;
     muse::async::Notification m_isMidiInputEnabledChanged;
     muse::async::Notification m_startNoteInputAtSelectedNoteRestWhenPressingMidiKeyChanged;
@@ -287,5 +292,7 @@ private:
 
     muse::async::Notification m_isAutomaticallyPanEnabledChanged;
     muse::async::Notification m_isCountInEnabledChanged;
+
+    bool m_continuingTupletInput = false;
 };
 }

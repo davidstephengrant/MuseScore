@@ -158,6 +158,12 @@ public:
     virtual void setTupletCommandsSelectedDurationAs(engraving::TupletSelectedDuration selectedDurationAs) = 0;
     virtual muse::async::Notification tupletCommandsSelectedDurationAsChanged() const = 0;
 
+    // continuing tuplets: a tuplet added during note input starts continuing tuplet input;
+    // kept for the session only, so it's off at each launch
+    virtual bool continuingTupletInput() const = 0;
+    virtual void setContinuingTupletInput(bool continuing) = 0;
+    virtual muse::async::Notification continuingTupletInputChanged() const = 0;
+
     virtual muse::io::path_t userMusicFontsPath() const = 0;
     virtual void setUserMusicFontsPath(const muse::io::path_t& path) = 0;
     virtual muse::async::Channel<muse::io::path_t> userMusicFontsPathChanged() const = 0;

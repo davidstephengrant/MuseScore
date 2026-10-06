@@ -417,6 +417,21 @@ muse::async::Notification NotationConfigurationStub::tupletCommandsSelectedDurat
     return n;
 }
 
+bool NotationConfigurationStub::continuingTupletInput() const
+{
+    return false;
+}
+
+void NotationConfigurationStub::setContinuingTupletInput(bool)
+{
+}
+
+muse::async::Notification NotationConfigurationStub::continuingTupletInputChanged() const
+{
+    static muse::async::Notification n;
+    return n;
+}
+
 muse::io::path_t NotationConfigurationStub::userMusicFontsPath() const
 {
     return muse::io::path_t();

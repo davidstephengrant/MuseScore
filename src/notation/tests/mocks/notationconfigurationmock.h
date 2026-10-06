@@ -143,6 +143,10 @@ public:
     MOCK_METHOD(void, setTupletCommandsSelectedDurationAs, (engraving::TupletSelectedDuration), (override));
     MOCK_METHOD(muse::async::Notification, tupletCommandsSelectedDurationAsChanged, (), (const, override));
 
+    MOCK_METHOD(bool, continuingTupletInput, (), (const, override));
+    MOCK_METHOD(void, setContinuingTupletInput, (bool), (override));
+    MOCK_METHOD(muse::async::Notification, continuingTupletInputChanged, (), (const, override));
+
     MOCK_METHOD(muse::io::path_t, userMusicFontsPath, (), (const, override));
     MOCK_METHOD(void, setUserMusicFontsPath, (const muse::io::path_t&), (override));
     MOCK_METHOD(muse::async::Channel<muse::io::path_t>, userMusicFontsPathChanged, (), (const, override));

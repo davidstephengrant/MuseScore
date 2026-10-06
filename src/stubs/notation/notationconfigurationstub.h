@@ -147,6 +147,10 @@ public:
     void setTupletCommandsSelectedDurationAs(engraving::TupletSelectedDuration selectedDurationAs) override;
     muse::async::Notification tupletCommandsSelectedDurationAsChanged() const override;
 
+    bool continuingTupletInput() const override;
+    void setContinuingTupletInput(bool continuing) override;
+    muse::async::Notification continuingTupletInputChanged() const override;
+
     muse::io::path_t userMusicFontsPath() const override;
     void setUserMusicFontsPath(const muse::io::path_t& path) override;
     muse::async::Channel<muse::io::path_t> userMusicFontsPathChanged() const override;
