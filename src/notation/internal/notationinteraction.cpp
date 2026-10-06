@@ -5726,11 +5726,13 @@ void NotationInteraction::addTupletToSelectedChordRests(const TupletOptions& opt
         return;
     }
 
+    std::vector<Tuplet*> tuplets;
     transaction(TranslatableString("undoableAction", "Add tuplet"), [&](mu::engraving::Transaction& tx) {
-        EditTuplet::addTuplets(tx, score(), options.ratio, options.numberType, options.bracketType, options.autoBaseLen,
-                               options.selectedDurationAsNoteValue);
+        tuplets = EditTuplet::addTuplets(tx, score(), options.ratio, options.numberType, options.bracketType, options.autoBaseLen,
+                                         options.selectedDurationAsNoteValue);
     });
     notifyAboutNotationChanged();
+    m_noteInput->setNewTuplets({ tuplets.begin(), tuplets.end() });
 }
 
 void NotationInteraction::addBeamToSelectedChordRests(BeamMode mode)

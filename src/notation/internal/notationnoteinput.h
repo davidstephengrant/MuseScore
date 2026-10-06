@@ -77,6 +77,7 @@ public:
 
     bool stickyTupletsOn() const override;
     void setStickyTuplets(bool on) override;
+    void setNewTuplets(const std::vector<const mu::engraving::Tuplet*>& tuplets) override;
 
     void addSlur(mu::engraving::Slur* slur) override;
     void resetSlur() override;
@@ -146,6 +147,9 @@ private:
 
     // a tuplet was pending at the last state change
     bool m_tupletWasPending = false;
+
+    // tuplets the last command added outside note input
+    std::vector<const mu::engraving::Tuplet*> m_newTuplets;
     // the run that turning sticky tuplets off ended, for turning them on again
     std::optional<mu::engraving::StickyTuplet> m_pausedStickyTuplet;
 };

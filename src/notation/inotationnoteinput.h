@@ -65,6 +65,8 @@ public:
     // sticky tuplet input: note input keeps creating the same tuplet
     virtual bool stickyTupletsOn() const = 0;
     virtual void setStickyTuplets(bool on) = 0;
+    // tuplets just added outside note input: note input started in one of them continues it
+    virtual void setNewTuplets(const std::vector<const mu::engraving::Tuplet*>& tuplets) = 0;
 
     virtual void doubleNoteInputDuration() = 0;
     virtual void halveNoteInputDuration() = 0;

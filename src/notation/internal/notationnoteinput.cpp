@@ -82,6 +82,7 @@ NotationNoteInput::NotationNoteInput(const IGetScore* getScore, INotationInterac
 {
     m_interaction->selectionChanged().onNotify(this, [this]() {
         if (!isNoteInputMode()) {
+            m_newTuplets.clear();
             updateInputState();
         } else if (shouldSetupInputNote()) {
             const NoteInputState& is = state();
@@ -108,6 +109,8 @@ NotationNoteInput::NotationNoteInput(const IGetScore* getScore, INotationInterac
     });
     if (m_undoStack) {
         m_undoStack->stackChanged().onNotify(this, [this]() {
+            // any later edit forgets the tuplets the last command added
+            m_newTuplets.clear();
             announcePendingTupletChange();
         });
     }
@@ -132,6 +135,9 @@ void NotationNoteInput::startNoteInput(NoteInputMethod method, bool focusNotatio
         return;
     }
 
+    // taken first: selecting the start position below forgets them
+    const std::vector<const Tuplet*> newTuplets = std::move(m_newTuplets);
+    m_newTuplets.clear();
     m_pausedStickyTuplet.reset();
 
     EngravingItem* el = resolveNoteInputStartPosition();
@@ -183,6 +189,15 @@ void NotationNoteInput::startNoteInput(NoteInputMethod method, bool focusNotatio
     }
     case StaffGroup::PERCUSSION:
         break;
+    }
+
+    // a tuplet just added outside note input becomes the sticky tuplet
+    if (configuration()->stickyTupletInput()) {
+        const ChordRest* cr = is.cr();
+        const Tuplet* tuplet = cr ? cr->tuplet() : nullptr;
+        if (tuplet && muse::contains(newTuplets, tuplet)) {
+            startStickyTuplet(tuplet);
+        }
     }
 
     notifyAboutNoteInputStarted(focusNotation);
@@ -981,6 +996,11 @@ bool NotationNoteInput::resumeStickyTuplet()
     // the first note gets the tuplet's note value, as when a waiting tuplet starts the run
     is.setDuration(paused->levels.back().baseLen);
     return true;
+}
+
+void NotationNoteInput::setNewTuplets(const std::vector<const Tuplet*>& tuplets)
+{
+    m_newTuplets = tuplets;
 }
 
 void NotationNoteInput::startStickyTuplet(const Tuplet* tuplet)

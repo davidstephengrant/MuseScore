@@ -165,7 +165,7 @@ public:
     virtual void setTupletsWaitForNextDuration(bool wait) = 0;
     virtual muse::async::Notification tupletsWaitForNextDurationChanged() const = 0;
 
-    // sticky tuplets: a tuplet added during note input starts sticky tuplet input;
+    // sticky tuplets: a tuplet added during note input, or just before it starts, starts sticky tuplet input;
     // kept for the session only, so it's off at each launch
     virtual bool stickyTupletInput() const = 0;
     virtual void setStickyTupletInput(bool sticky) = 0;
