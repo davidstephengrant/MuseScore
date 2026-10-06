@@ -895,6 +895,7 @@ bool NotationNoteInput::setPendingTuplet(const TupletOptions& options)
     return true;
 }
 
+// Cancels a pending tuplet together with sticky tuplet input
 void NotationNoteInput::cancelPendingTuplet()
 {
     NoteInputState& is = score()->inputState();
@@ -904,8 +905,11 @@ void NotationNoteInput::cancelPendingTuplet()
 
     const String type = Tuplet::typeUserName(is.pendingTuplet()->ratio.numerator());
     is.setPendingTuplet(std::nullopt);
-
     m_tupletWasPending = false;
+    if (stickyTupletsOn()) {
+        endStickyTuplets();
+    }
+
     //: %1 is a tuplet type, e.g. "Triplet"
     accessibilityController()->announce(muse::mtrc("notation", "%1 cancelled").arg(type));
     notifyAboutStateChanged();

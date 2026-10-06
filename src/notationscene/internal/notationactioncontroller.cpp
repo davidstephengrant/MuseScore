@@ -821,9 +821,13 @@ void NotationActionController::resetState()
     if (noteInput->isNoteInputMode()) {
         noteInput->forgetPendingTuplets();
 
-        // the first Escape cancels a pending tuplet, the next one ends note input
+        // Escape cancels a pending tuplet together with sticky tuplet input, else ends sticky tuplet input, else note input
         if (noteInput->tupletPending()) {
             noteInput->cancelPendingTuplet();
+            return;
+        }
+        if (noteInput->stickyTupletsOn()) {
+            noteInput->setStickyTuplets(false);
             return;
         }
 
