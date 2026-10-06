@@ -99,6 +99,8 @@ struct PendingTuplet {
     bool durationAsNoteValue = false;
     // By note name and Insert: the duration that sizes the tuplet; otherwise the next duration does
     std::optional<TDuration> duration;
+    // the tuplet starts sticky tuplet input when it is added
+    bool sticky = false;
     // given when it starts waiting, see InputState::forgetPendingTuplets()
     int number = 0;
 
@@ -125,6 +127,7 @@ struct StickyTuplet {
     std::vector<Level> levels;
 
     static StickyTuplet of(const Tuplet* tuplet);
+    static StickyTuplet continuing(const Tuplet* tuplet, const std::optional<StickyTuplet>& paused);
     bool startsWith(const Tuplet* tuplet) const;
 };
 
@@ -210,7 +213,8 @@ public:
     bool inInsertedTuplet(const ChordRest* cr) const;
 
     const std::optional<StickyTuplet>& stickyTuplet() const { return m_stickyTuplet; }
-    void setStickyTuplet(const std::optional<StickyTuplet>& t) { m_stickyTuplet = t; }
+    void setStickyTuplet(const std::optional<StickyTuplet>& t) { m_stickyTuplet = t; m_stickyTupletResumedAt.reset(); }
+    void resumeStickyTuplet(const StickyTuplet& t);
     bool stickyTupletsAllowed() const;
     const Tuplet* tupletToContinue() const;
     bool stickyTupletContinues() const;
@@ -261,6 +265,13 @@ private:
     // Insert: where the tuplet that a waiting tuplet inserted starts
     std::optional<std::pair<Fraction, track_idx_t> > m_insertedTuplet;
     std::optional<StickyTuplet> m_stickyTuplet;
+    // where sticky tuplet input was turned on again away from a tuplet of its kind
+    struct ResumedAt {
+        Fraction tick;
+        track_idx_t track = muse::nidx;
+        bool beyondScore = false;
+    };
+    std::optional<ResumedAt> m_stickyTupletResumedAt;
 
     // kept through undo and redo: the last number given to a waiting tuplet, and the last one cancelled
     int m_pendingTupletNumber = 0;

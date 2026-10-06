@@ -264,6 +264,7 @@ bool InputState::stickyTupletsAllowed() const
     case NoteEntryMethod::BY_NOTE_NAME:
     case NoteEntryMethod::BY_DURATION:
     case NoteEntryMethod::RHYTHM:
+    case NoteEntryMethod::TIMEWISE:
         return true;
     default:
         return false;
@@ -309,6 +310,22 @@ bool StickyTuplet::startsWith(const Tuplet* tuplet) const
 }
 
 //---------------------------------------------------------
+//   StickyTuplet::continuing
+//    The sticky tuplet that continues this tuplet: a paused
+//    run it is the outer part of, with all its levels, or
+//    else the tuplet with the tuplets it is nested in
+//---------------------------------------------------------
+
+StickyTuplet StickyTuplet::continuing(const Tuplet* tuplet, const std::optional<StickyTuplet>& paused)
+{
+    StickyTuplet sticky = of(tuplet);
+    if (paused && paused->levels.size() > sticky.levels.size() && paused->startsWith(tuplet)) {
+        return *paused;
+    }
+    return sticky;
+}
+
+//---------------------------------------------------------
 //   tupletToContinue
 //    The tuplet that ends straight before the input position,
 //    or ends together with a tuplet it is nested in (unless the
@@ -343,13 +360,32 @@ const Tuplet* InputState::tupletToContinue() const
 //---------------------------------------------------------
 //   stickyTupletContinues
 //    Whether sticky tuplet input continues at the input
-//    position: in tuplets of the sticky kind, or straight
-//    after them. Moving elsewhere ends it.
+//    position: in tuplets of the sticky kind, straight after
+//    them, or where it was resumed. Moving elsewhere ends it.
 //---------------------------------------------------------
 
 bool InputState::stickyTupletContinues() const
 {
-    return m_stickyTuplet && m_stickyTuplet->startsWith(tupletToContinue());
+    if (!m_stickyTuplet) {
+        return false;
+    }
+    if (m_stickyTupletResumedAt && m_stickyTupletResumedAt->tick == tick() && m_stickyTupletResumedAt->track == m_track
+        && m_stickyTupletResumedAt->beyondScore == m_beyondScore) {
+        return true;
+    }
+    return m_stickyTuplet->startsWith(tupletToContinue());
+}
+
+//---------------------------------------------------------
+//   resumeStickyTuplet
+//    Sticky tuplet input with this tuplet, which continues at
+//    the input position as if straight after one of them
+//---------------------------------------------------------
+
+void InputState::resumeStickyTuplet(const StickyTuplet& t)
+{
+    m_stickyTuplet = t;
+    m_stickyTupletResumedAt = ResumedAt { tick(), m_track, m_beyondScore };
 }
 
 void InputState::setVoice(voice_idx_t v)

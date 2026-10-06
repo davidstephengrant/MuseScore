@@ -448,9 +448,25 @@ Note* NoteInput::addPitch(Transaction& tx, Score* score, NoteVal& nval, bool add
         return nullptr;
     }
 
+    // a drum in another voice ends sticky tuplet input, as a voice change does
+    if (noteTrack != is.track()) {
+        is.setStickyTuplet(std::nullopt);
+    }
+
+    // in Insert input, the next sticky tuplet's time is inserted first, as for a letter
+    if (!externalInputState && is.usingNoteEntryMethod(NoteEntryMethod::TIMEWISE) && stickyTupletInsertsHere(is)
+        && !insertStickyTuplets(tx, score, is)) {
+        return nullptr;
+    }
+
     // in the tuplet that a waiting tuplet inserted, no longer than the time left in it
     const Fraction inputDuration = is.usingNoteEntryMethod(NoteEntryMethod::TIMEWISE) ? insertedTupletDuration(is, is.duration().fraction())
                                    : is.duration().fraction();
+
+    if (!stickyTupletsFit(score, is, inputDuration)) {
+        MScore::setError(MsError::NO_SPACE_FOR_STICKY_TUPLET);
+        return nullptr;
+    }
 
     if (is.beyondScore()) {
         score->appendMeasures(1);
@@ -500,6 +516,8 @@ Note* NoteInput::addPitch(Transaction& tx, Score* score, NoteVal& nval, bool add
     } else {
         duration = inputDuration;
     }
+    addStickyTuplets(tx, score, is, duration);
+
     Note* note = nullptr;
     Note* lastTiedNote = nullptr;
     if (is.usingNoteEntryMethod(NoteEntryMethod::REPITCH) && is.cr()->isChord()) {
@@ -987,9 +1005,22 @@ Ret NoteInput::putNote(Transaction& tx, Score* score, const Position& p, bool re
             is = inputStateBefore;
             return make_ret(Ret::Code::UnknownError);
         }
+        // in Insert input, the next sticky tuplet's time is inserted first, as for a letter (e.g. a tablature fret)
+        if (!insert && is.usingNoteEntryMethod(NoteEntryMethod::TIMEWISE) && stickyTupletInsertsHere(is)
+            && !insertStickyTuplets(tx, score, is)) {
+            is = inputStateBefore;
+            return make_ret(Ret::Code::UnknownError);
+        }
         const Fraction inputDuration = is.duration().fraction();
         const Fraction duration = insert || is.usingNoteEntryMethod(NoteEntryMethod::TIMEWISE) ? insertedTupletDuration(is, inputDuration)
                                   : inputDuration;
+        if (!stickyTupletsFit(score, is, duration)) {
+            // the error rolls back what was changed above
+            MScore::setError(MsError::NO_SPACE_FOR_STICKY_TUPLET);
+            is = inputStateBefore;
+            return make_ret(Ret::Code::UnknownError);
+        }
+        addStickyTuplets(tx, score, is, duration);
         Segment* seg = score->setNoteRest(is.segment(), is.track(), nval,
                                           duration, stemDirection, forceAccidental, is.articulationIds());
         if (!seg) {
@@ -1099,6 +1130,18 @@ Ret NoteInput::repitchNote(Transaction& tx, Score* score, const Position& p, boo
 //   insertChordByInsertingTime
 //---------------------------------------------------------
 
+// Whether a note inserted at `pos` inserts the next sticky tuplet's time, as at the input position
+static bool stickyTupletInsertsAt(const InputState& is, Segment* seg, const Position& pos)
+{
+    if (pos.beyondScore) {
+        return false;
+    }
+    InputState at = is;
+    at.setTrack(pos.staffIdx * VOICES + is.voice());
+    at.setSegment(seg);
+    return NoteInput::stickyTupletInsertsHere(at);
+}
+
 Ret NoteInput::insertChordByInsertingTime(Transaction& tx, Score* score, const Position& pos)
 {
     // insert by increasing measure length
@@ -1134,6 +1177,14 @@ Ret NoteInput::insertChordByInsertingTime(Transaction& tx, Score* score, const P
         p.segment = is.segment();
         // the tuplet's measure is already there
         p.beyondScore = false;
+    } else if (stickyTupletInsertsAt(is, seg, pos)) {
+        // so does a sticky tuplet where its run goes on
+        is.setTrack(pos.staffIdx * VOICES + is.voice());
+        is.setSegment(seg);
+        if (!insertStickyTuplets(tx, score, is)) {
+            return make_ret(Ret::Code::UnknownError);
+        }
+        p.segment = is.segment();
     } else {
         p.segment = insertTime(tx, score, seg, is.duration().fraction());
         is.setInsertedTuplet(nullptr);
@@ -1285,6 +1336,231 @@ bool NoteInput::insertSplitsTuplet(const Segment* segment)
         }
     }
     return false;
+}
+
+//---------------------------------------------------------
+//   addStickyTuplets
+//    With a sticky tuplet, make sure that the time a note or
+//    rest of this duration takes from the input position is in
+//    tuplets, creating them where there are none yet. A nested
+//    sticky tuplet is created with the tuplets it is nested in.
+//    Callers check stickyTupletsFit first.
+//---------------------------------------------------------
+
+void NoteInput::addStickyTuplets(Transaction&, Score* score, InputState& is, const Fraction& duration)
+{
+    if (!is.stickyTuplet() || !is.stickyTupletsAllowed() || !is.segment()) {
+        return;
+    }
+
+    if (!is.stickyTupletContinues()) {
+        is.setStickyTuplet(std::nullopt);
+        return;
+    }
+
+    const StickyTuplet sticky = *is.stickyTuplet();
+    const track_idx_t track = is.track();
+    const Fraction inputTick = is.tick();
+    Fraction tick = inputTick;
+    Fraction remaining = duration;
+
+    while (remaining.isNotZero()) {
+        if (tick >= score->endTick()) {
+            score->appendMeasures(1);
+        }
+        Segment* segment = score->tick2segment(tick, true, SegmentType::ChordRest);
+        if (!segment) {
+            break;
+        }
+        // remove a measure repeat first, like entering a note there does; a tuplet can't replace it
+        Measure* measure = segment->measure();
+        const staff_idx_t staffIdx = track2staff(track);
+        if (measure->isMeasureRepeatGroup(staffIdx)) {
+            score->deleteItem(measure->measureRepeatElement(staffIdx));
+            segment = score->tick2segment(tick, true, SegmentType::ChordRest);
+            if (!segment) {
+                break;
+            }
+        }
+        score->expandVoice(segment, track);
+        ChordRest* cr = segment->cr(track);
+        if (!cr) {
+            break;
+        }
+
+        // create the levels of the sticky tuplet that aren't here yet, from the outermost one in
+        Tuplet* tuplet = cr->tuplet();
+        if (!tuplet || sticky.startsWith(tuplet)) {
+            size_t level = 0;
+            for (const Tuplet* t = tuplet; t; t = t->tuplet()) {
+                ++level;
+            }
+            for (; level < sticky.levels.size() && cr; ++level) {
+                const StickyTuplet::Level& l = sticky.levels[level];
+                // addTuplet would show a warning if it can't add the tuplet
+                tuplet = score->canAddTuplet(cr, l.ratio, l.baseLen)
+                         ? score->addTuplet(cr, l.ratio, l.baseLen, l.numberType, l.bracketType) : nullptr;
+                if (!tuplet) {
+                    break;
+                }
+                // the new tuplet replaces the chord or rest here
+                Segment* s = score->tick2segment(tick, true, SegmentType::ChordRest);
+                cr = s ? s->cr(track) : nullptr;
+            }
+            if (level < sticky.levels.size() || !tuplet || !cr) {
+                is.setStickyTuplet(std::nullopt);
+                break;
+            }
+        }
+
+        // a longer note or rest continues in the next tuplet
+        const Fraction tupletEnd = tuplet->tick() + tuplet->actualTicks();
+        const Fraction left = (tupletEnd - tick) / actualTicks(Fraction(1, 1), tuplet, cr->staff()->timeStretch(tick));
+        if (remaining <= left) {
+            break;
+        }
+        remaining -= left;
+        tick = tupletEnd;
+    }
+
+    // creating a tuplet on a measure rest replaces the segment at the input position, and addTuplet can
+    // reselect the selection, which moves the input position to its voice
+    is.setTrack(track);
+    is.setSegment(score->tick2segment(inputTick, false, SegmentType::ChordRest));
+}
+
+//---------------------------------------------------------
+//   stickyTupletInsertsHere
+//    Whether inserting at the input position inserts the time
+//    of the next sticky tuplet: where sticky tuplet input goes
+//    on, outside the tuplet being filled and not inside
+//    another tuplet
+//---------------------------------------------------------
+
+bool NoteInput::stickyTupletInsertsHere(const InputState& is)
+{
+    return !is.beyondScore() && is.segment() && !is.segment()->splitsTuplet() && !is.inInsertedTuplet(is.cr())
+           && is.stickyTuplet() && is.stickyTupletsAllowed() && is.stickyTupletContinues();
+}
+
+//---------------------------------------------------------
+//   insertStickyTuplets
+//    Where stickyTupletInsertsHere, insert the time of the
+//    next sticky tuplet at the input position and create it
+//    there at once, as for a note of its innermost note value.
+//    The next notes and rests fill it, like a tuplet that a
+//    waiting tuplet inserted. False if inserting time there
+//    would split a tuplet in any track: then nothing is
+//    entered.
+//---------------------------------------------------------
+
+bool NoteInput::insertStickyTuplets(Transaction& tx, Score* score, InputState& is)
+{
+    if (insertSplitsTuplet(is.segment())) {
+        MScore::setError(MsError::CANNOT_INSERT_TUPLET);
+        return false;
+    }
+
+    const StickyTuplet sticky = *is.stickyTuplet();
+    const StickyTuplet::Level& outermost = sticky.levels.front();
+    is.setSegment(insertTime(tx, score, is.segment(), outermost.baseLen.fraction() * outermost.ratio.denominator()));
+    addStickyTuplets(tx, score, is, sticky.levels.back().baseLen.fraction());
+    const Tuplet* tuplet = is.cr() ? is.cr()->tuplet() : nullptr;
+    while (tuplet && tuplet->tuplet()) {
+        tuplet = tuplet->tuplet();
+    }
+    is.setInsertedTuplet(tuplet);
+    return true;
+}
+
+//---------------------------------------------------------
+//   stickyTupletsFit
+//    Whether the sticky tuplets that a note or rest of this
+//    duration needs from the input position fit, like
+//    addStickyTuplets creates them. If they don't, nothing is
+//    entered: the user ends sticky tuplet input. A zero
+//    duration checks only the tuplets at the input position.
+//---------------------------------------------------------
+
+bool NoteInput::stickyTupletsFit(const Score* score, const InputState& is, const Fraction& duration)
+{
+    if (!is.stickyTuplet() || !is.stickyTupletsAllowed() || !is.segment() || !is.stickyTupletContinues()) {
+        return true;
+    }
+
+    const StickyTuplet& sticky = *is.stickyTuplet();
+    const Staff* staff = is.track() != muse::nidx ? score->staff(track2staff(is.track())) : nullptr;
+    const Measure* last = score->lastMeasure();
+    if (!staff || !last) {
+        return true;
+    }
+
+    Fraction tick = is.beyondScore() ? score->endTick() : is.tick();
+    Fraction remaining = duration;
+
+    while (true) {
+        Tuplet* tuplet = nullptr;
+        Fraction limit;
+        Fraction timeStretch(1, 1);
+        if (tick >= score->endTick()) {
+            // new measures like the last one
+            const Fraction measures = (tick - score->endTick()) / last->ticks();
+            limit = score->endTick() + last->ticks() * Fraction(measures.numerator() / measures.denominator() + 1, 1);
+        } else {
+            const Segment* segment = score->tick2segment(tick, true, SegmentType::ChordRest);
+            if (!segment) {
+                return true;
+            }
+            const ChordRest* cr = segment->cr(is.track());
+            tuplet = cr ? cr->tuplet() : nullptr;
+            limit = tuplet ? tuplet->tick() + tuplet->actualTicks() : segment->measure()->endTick();
+            timeStretch = staff->timeStretch(tick);
+        }
+
+        // the innermost tuplet here, or the time it would take once the missing levels are created
+        Fraction factor = actualTicks(Fraction(1, 1), tuplet, timeStretch);
+        Fraction tupletEnd = limit;
+        if (!tuplet || sticky.startsWith(tuplet)) {
+            size_t level = 0;
+            for (const Tuplet* t = tuplet; t; t = t->tuplet()) {
+                ++level;
+            }
+            for (; level < sticky.levels.size(); ++level) {
+                const StickyTuplet::Level& l = sticky.levels[level];
+                const Fraction ticks = l.baseLen.fraction() * l.ratio.denominator() * factor;
+                if (tick + ticks > tupletEnd) {
+                    return false;
+                }
+                tupletEnd = tick + ticks;
+                factor /= l.ratio;
+            }
+        }
+
+        // a longer note or rest continues in the next tuplet
+        const Fraction left = (tupletEnd - tick) / factor;
+        if (remaining <= left) {
+            break;
+        }
+        remaining -= left;
+        tick = tupletEnd;
+    }
+
+    return true;
+}
+
+//---------------------------------------------------------
+//   nextStickyTupletFits
+//    Whether the sticky tuplets that the next note or rest
+//    creates at the input position fit
+//---------------------------------------------------------
+
+bool NoteInput::nextStickyTupletFits(const Score* score, const InputState& is)
+{
+    // in Insert input, its time is inserted, unless that would split a tuplet
+    if (is.usingNoteEntryMethod(NoteEntryMethod::TIMEWISE) && stickyTupletInsertsHere(is)) {
+        return !insertSplitsTuplet(is.segment());
+    }
+    return stickyTupletsFit(score, is, Fraction(0, 1));
 }
 
 //---------------------------------------------------------
@@ -1696,6 +1972,9 @@ static bool addPendingTuplet(Transaction& tx, Score* score, bool insertTime)
     if (insertTime) {
         is.setInsertedTuplet(tuplet);
     }
+    if (pending.sticky && is.stickyTupletsAllowed()) {
+        is.setStickyTuplet(StickyTuplet::of(tuplet));
+    }
     is.setSegment(toChordRest(tuplet->elements().front())->segment());
     if (!pending.duration) {
         is.setDuration(baseLen);
@@ -1768,8 +2047,21 @@ void NoteInput::setDuration(Transaction& tx, Score* score, DurationType duration
                 return;
             }
 
+            // a drum in another voice ends sticky tuplet input, as a voice change does
+            if (drumInOtherVoice(is)) {
+                is.setStickyTuplet(std::nullopt);
+            }
+
+            // a sticky tuplet that doesn't fit: nothing is entered until the user ends sticky tuplet input
+            if (!stickyTupletsFit(score, is, is.duration().fraction())) {
+                MScore::setError(MsError::NO_SPACE_FOR_STICKY_TUPLET);
+                is.setDuration(oldDuration);
+                return;
+            }
+
             if (is.rest()) {
                 // Enter a rest
+                addStickyTuplets(tx, score, is, is.duration().fraction());
                 score->setNoteRest(is.segment(), is.track(), NoteVal(), is.duration().fraction());
                 is.moveToNextInputPos();
             } else {
@@ -1784,10 +2076,13 @@ void NoteInput::setDuration(Transaction& tx, Score* score, DurationType duration
                     score->appendMeasures(1);
                     is.moveToNextInputPos();
                 }
+                // a new sticky tuplet replaces the chord here, so the note isn't added to that chord
+                const ChordRest* oldCr = is.cr();
+                addStickyTuplets(tx, score, is, is.duration().fraction());
                 ChordRest* cr = is.cr();
                 Chord* chord = nullptr;
 
-                if (cr && cr->isChord() && cr->durationType() == is.duration()) {
+                if (cr && cr == oldCr && cr->isChord() && cr->durationType() == is.duration()) {
                     chord = toChord(cr);
                 }
 

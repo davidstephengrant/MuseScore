@@ -31,10 +31,14 @@
 #include "engraving/dom/note.h"
 #include "engraving/dom/segment.h"
 #include "engraving/dom/staff.h"
+#include "engraving/dom/tie.h"
 #include "engraving/dom/timesig.h"
 #include "engraving/dom/tuplet.h"
+#include "engraving/editing/editchord.h"
 #include "engraving/editing/editexcerpt.h"
+#include "engraving/editing/editmeasurerepeat.h"
 #include "engraving/editing/edittie.h"
+#include "engraving/editing/edittimesig.h"
 #include "engraving/editing/edittuplet.h"
 #include "engraving/editing/noteinput.h"
 #include "engraving/editing/splitjoinmeasure.h"
@@ -3601,6 +3605,2170 @@ TEST_F(Engraving_TupletTests, pendingTupletInsertDottedFillingNote)
         EXPECT_EQ(rhythm(measureAt(score, 0)), "4 3:2[8. 4.] 4 4 4");
         EXPECT_EQ(measureAt(score, 0)->ticks(), Fraction(11, 8));
         expectD(chordRestAt(measureAt(score, 0), 3));
+
+        delete score;
+    }
+}
+
+//-----------------------------------------
+//    sticky tuplets
+//     note input keeps creating eighth note triplets,
+//     in an empty 4/4 score
+//-----------------------------------------
+
+static const StickyTuplet::Level EIGHTH_TRIPLET { Fraction(3, 2), TDuration(DurationType::V_EIGHTH), TupletNumberType::SHOW_NUMBER,
+                                                  TupletBracketType::AUTO_BRACKET };
+static const StickyTuplet::Level QUARTER_TRIPLET { Fraction(3, 2), TDuration(DurationType::V_QUARTER), TupletNumberType::SHOW_NUMBER,
+                                                   TupletBracketType::AUTO_BRACKET };
+
+static ChordRest* stickyCrAt(Score* score, const Fraction& tick, track_idx_t track = 0)
+{
+    Segment* s = score->tick2segment(tick, false, SegmentType::ChordRest);
+    return s ? toChordRest(s->element(track)) : nullptr;
+}
+
+// like a tuplet command with sticky tuplets on: a triplet at the input position, then sticky input
+static void startStickyTuplet(Score* score, const Fraction& tick, track_idx_t track = 0)
+{
+    const Tuplet* tuplet = nullptr;
+    score->transactionManager()->transaction(TranslatableString::untranslatable("Sticky tuplet tests"), [&](Transaction&) {
+        tuplet = score->addTuplet(stickyCrAt(score, tick, track), EIGHTH_TRIPLET.ratio, EIGHTH_TRIPLET.baseLen, EIGHTH_TRIPLET.numberType,
+                                  EIGHTH_TRIPLET.bracketType);
+    });
+    InputState& is = score->inputState();
+    is.setSegment(score->tick2segment(tick, false, SegmentType::ChordRest));
+    is.setDuration(DurationType::V_EIGHTH);
+    is.setStickyTuplet(StickyTuplet::of(tuplet));
+}
+
+static MasterScore* stickyTupletScore(NoteEntryMethod method = NoteEntryMethod::BY_NOTE_NAME, bool start = true)
+{
+    MasterScore* score = ScoreRW::readScore(TUPLET_DATA_DIR + u"empty.mscx");
+    if (!score) {
+        return nullptr;
+    }
+    InputState& is = score->inputState();
+    is.setTrack(0);
+    is.setSegment(score->tick2segment(Fraction(0, 1), false, SegmentType::ChordRest));
+    is.setDuration(DurationType::V_EIGHTH);
+    is.setNoteEntryMode(true);
+    is.setNoteEntryMethod(method);
+    if (start) {
+        startStickyTuplet(score, Fraction(0, 1));
+    }
+    return score;
+}
+
+// note input in a score from tuplet_data, at the start of the given track
+static MasterScore* stickyTupletScoreFrom(const String& file, track_idx_t track)
+{
+    MasterScore* score = ScoreRW::readScore(TUPLET_DATA_DIR + file);
+    if (!score) {
+        return nullptr;
+    }
+    InputState& is = score->inputState();
+    is.setTrack(track);
+    is.setSegment(score->tick2segment(Fraction(0, 1), false, SegmentType::ChordRest));
+    is.setDuration(DurationType::V_EIGHTH);
+    is.setNoteEntryMode(true);
+    is.setNoteEntryMethod(NoteEntryMethod::BY_NOTE_NAME);
+    return score;
+}
+
+static void expectEighthTriplet(Tuplet* tuplet, const Fraction& tick)
+{
+    ASSERT_TRUE(tuplet);
+    EXPECT_EQ(tuplet->tick(), tick);
+    EXPECT_EQ(tuplet->ratio(), Fraction(3, 2));
+    EXPECT_EQ(tuplet->baseLen().type(), DurationType::V_EIGHTH);
+}
+
+static void expectValid(MasterScore* score)
+{
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+}
+
+// like a triplet command in By duration or Rhythm input with sticky tuplets on
+static void setPendingStickyTriplet(Score* score)
+{
+    setPendingTriplet(score, true);
+    InputState& is = score->inputState();
+    PendingTuplet pending = *is.pendingTuplet();
+    pending.sticky = true;
+    is.setPendingTuplet(pending);
+}
+
+// a note or rest as each input method enters it: by note name, the duration and then the note or rest;
+// by duration and rhythm, the dots and then the duration
+static void enterDuration(Score* score, DurationType type, int dots = 0, bool rest = false)
+{
+    InputState& is = score->inputState();
+    if (is.usingNoteEntryMethod(NoteEntryMethod::BY_NOTE_NAME)) {
+        TDuration duration(type);
+        duration.setDots(dots);
+        is.setDuration(duration);
+        if (rest) {
+            score->transactionManager()->transaction(TranslatableString::untranslatable("Sticky tuplet tests"), [&](Transaction&) {
+                score->enterRest(duration);
+            });
+        } else {
+            enterNote(score);
+        }
+        return;
+    }
+    is.setDots(dots);
+    is.setRest(rest);
+    pressDuration(score, type);
+    is.setRest(false);
+}
+
+TEST_F(Engraving_TupletTests, stickyTupletNotes)
+{
+    MasterScore* score = stickyTupletScore();
+    ASSERT_TRUE(score);
+
+    // 7 notes: two full triplets and the start of a third
+    for (int i = 0; i < 7; ++i) {
+        enterNote(score, 60 + i);
+    }
+    expectValid(score);
+
+    for (int i = 0; i < 3; ++i) {
+        const Fraction tick = Fraction(i, 4);
+        ChordRest* cr = stickyCrAt(score, tick);
+        ASSERT_TRUE(cr);
+        ASSERT_TRUE(cr->tuplet());
+        expectEighthTriplet(cr->tuplet(), tick);
+    }
+    for (DurationElement* e : stickyCrAt(score, Fraction(1, 4))->tuplet()->elements()) {
+        EXPECT_TRUE(e->isChord());
+    }
+    EXPECT_TRUE(score->inputState().stickyTuplet());
+
+    delete score;
+}
+
+TEST_F(Engraving_TupletTests, stickyTupletAcrossBarline)
+{
+    MasterScore* score = stickyTupletScore();
+    ASSERT_TRUE(score);
+
+    // 4 triplets fill the bar, the 13th note starts a triplet in the next bar
+    for (int i = 0; i < 13; ++i) {
+        enterNote(score);
+    }
+    expectValid(score);
+    ChordRest* cr = stickyCrAt(score, Fraction(1, 1));
+    ASSERT_TRUE(cr);
+    EXPECT_TRUE(cr->isChord());
+    ASSERT_TRUE(cr->tuplet());
+    expectEighthTriplet(cr->tuplet(), Fraction(1, 1));
+
+    delete score;
+}
+
+TEST_F(Engraving_TupletTests, stickyTupletRest)
+{
+    MasterScore* score = stickyTupletScore();
+    ASSERT_TRUE(score);
+
+    // a triplet of notes, then a rest starts the next triplet
+    for (int i = 0; i < 3; ++i) {
+        enterNote(score);
+    }
+    score->transactionManager()->transaction(TranslatableString::untranslatable("Sticky tuplet tests"), [&](Transaction&) {
+        score->enterRest(TDuration(DurationType::V_EIGHTH));
+    });
+    expectValid(score);
+
+    ChordRest* rest = stickyCrAt(score, Fraction(1, 4));
+    ASSERT_TRUE(rest);
+    EXPECT_TRUE(rest->isRest());
+    ASSERT_TRUE(rest->tuplet());
+    expectEighthTriplet(rest->tuplet(), Fraction(1, 4));
+
+    delete score;
+}
+
+TEST_F(Engraving_TupletTests, stickyTupletRestByDuration)
+{
+    MasterScore* score = stickyTupletScore(NoteEntryMethod::BY_DURATION);
+    ASSERT_TRUE(score);
+
+    // in input by duration mode, rests are entered by choosing a duration
+    for (int i = 0; i < 3; ++i) {
+        enterNote(score);
+    }
+    score->inputState().setRest(true);
+    score->transactionManager()->transaction(TranslatableString::untranslatable("Sticky tuplet tests"), [&](Transaction& tx) {
+        NoteInput::setDuration(tx, score, DurationType::V_EIGHTH);
+    });
+    expectValid(score);
+
+    ChordRest* rest = stickyCrAt(score, Fraction(1, 4));
+    ASSERT_TRUE(rest);
+    EXPECT_TRUE(rest->isRest());
+    ASSERT_TRUE(rest->tuplet());
+    expectEighthTriplet(rest->tuplet(), Fraction(1, 4));
+
+    delete score;
+}
+
+TEST_F(Engraving_TupletTests, stickyTupletPending)
+{
+    for (NoteEntryMethod method : { NoteEntryMethod::BY_DURATION, NoteEntryMethod::RHYTHM }) {
+        MasterScore* score = pendingTupletScore(method);
+        ASSERT_TRUE(score);
+        InputState& is = score->inputState();
+
+        // a tuplet waiting for the next duration starts sticky tuplet input when it is added
+        setPendingStickyTriplet(score);
+        for (int i = 0; i < 4; ++i) {
+            pressDuration(score, DurationType::V_EIGHTH);
+        }
+        expectValid(score);
+        EXPECT_EQ(rhythm(measureAt(score, 0)), "3:2[8 8 8] 3:2[8 r8 r8] r2");
+        EXPECT_TRUE(is.stickyTuplet());
+
+        // undoing the first note ends sticky tuplet input, and the tuplet waits again
+        for (int i = 0; i < 4; ++i) {
+            score->undoRedo(true, nullptr);
+        }
+        EXPECT_EQ(rhythm(measureAt(score, 0)), "R");
+        EXPECT_TRUE(is.pendingTupletHere());
+        EXPECT_FALSE(is.stickyTuplet());
+
+        delete score;
+    }
+}
+
+TEST_F(Engraving_TupletTests, stickyTupletPendingUndoAfterStop)
+{
+    for (NoteEntryMethod method : { NoteEntryMethod::BY_DURATION, NoteEntryMethod::RHYTHM }) {
+        MasterScore* score = pendingTupletScore(method);
+        ASSERT_TRUE(score);
+        InputState& is = score->inputState();
+
+        // after sticky tuplet input is switched off (not with Escape), undoing the first note brings back
+        // the waiting tuplet, but not sticky tuplet input
+        setPendingStickyTriplet(score);
+        for (int i = 0; i < 4; ++i) {
+            pressDuration(score, DurationType::V_EIGHTH);
+        }
+        is.setStickyTuplet(std::nullopt);
+        for (int i = 0; i < 4; ++i) {
+            score->undoRedo(true, nullptr);
+        }
+        EXPECT_EQ(rhythm(measureAt(score, 0)), "R");
+        ASSERT_TRUE(is.pendingTupletHere());
+        EXPECT_FALSE(is.pendingTuplet()->sticky);
+
+        // the triplet is added, then ordinary eighths
+        for (int i = 0; i < 4; ++i) {
+            pressDuration(score, DurationType::V_EIGHTH);
+        }
+        expectValid(score);
+        EXPECT_FALSE(is.stickyTuplet());
+        ChordRest* cr = score->findCR(Fraction(1, 4), 0);
+        ASSERT_TRUE(cr);
+        EXPECT_TRUE(cr->isChord());
+        EXPECT_FALSE(cr->tuplet());
+
+        delete score;
+    }
+}
+
+TEST_F(Engraving_TupletTests, stickyTupletPendingUndoAfterEscape)
+{
+    for (NoteEntryMethod method : { NoteEntryMethod::BY_DURATION, NoteEntryMethod::RHYTHM }) {
+        MasterScore* score = pendingTupletScore(method);
+        ASSERT_TRUE(score);
+        InputState& is = score->inputState();
+
+        // after Escape ends sticky tuplet input, undoing everything brings back neither the waiting tuplet
+        // nor sticky tuplet input
+        setPendingStickyTriplet(score);
+        for (int i = 0; i < 4; ++i) {
+            pressDuration(score, DurationType::V_EIGHTH);
+        }
+        is.forgetPendingTuplets();
+        is.setStickyTuplet(std::nullopt);
+        for (int i = 0; i < 4; ++i) {
+            score->undoRedo(true, nullptr);
+        }
+        EXPECT_EQ(rhythm(measureAt(score, 0)), "R");
+        EXPECT_FALSE(is.pendingTuplet());
+        EXPECT_FALSE(is.stickyTuplet());
+
+        // the next notes are ordinary eighths
+        for (int i = 0; i < 4; ++i) {
+            pressDuration(score, DurationType::V_EIGHTH);
+        }
+        expectValid(score);
+        EXPECT_EQ(rhythm(measureAt(score, 0)), "8 8 8 8 r2");
+
+        delete score;
+    }
+}
+
+TEST_F(Engraving_TupletTests, stickyTupletPendingNoteName)
+{
+    MasterScore* score = pendingTupletScore(NoteEntryMethod::BY_NOTE_NAME);
+    ASSERT_TRUE(score);
+    InputState& is = score->inputState();
+
+    // in By note name input, a waiting tuplet starts sticky tuplet input when the next note adds it
+    is.setDuration(DurationType::V_EIGHTH);
+    PendingTuplet pending;
+    pending.ratio = Fraction(3, 2);
+    pending.numberType = TupletNumberType::SHOW_NUMBER;
+    pending.bracketType = TupletBracketType::AUTO_BRACKET;
+    pending.autoBaseLen = true;
+    pending.durationAsNoteValue = true;
+    pending.sticky = true;
+    ASSERT_TRUE(NoteInput::setPendingTuplet(score, pending));
+    for (int i = 0; i < 4; ++i) {
+        enterNote(score);
+    }
+    expectValid(score);
+    EXPECT_EQ(rhythm(measureAt(score, 0)), "3:2[8 8 8] 3:2[8 r8 r8] r2");
+    EXPECT_TRUE(is.stickyTuplet());
+
+    // undoing the first note ends sticky tuplet input, and the tuplet waits again
+    for (int i = 0; i < 4; ++i) {
+        score->undoRedo(true, nullptr);
+    }
+    EXPECT_EQ(rhythm(measureAt(score, 0)), "R");
+    EXPECT_TRUE(is.pendingTupletHere());
+    EXPECT_FALSE(is.stickyTuplet());
+
+    delete score;
+}
+
+TEST_F(Engraving_TupletTests, stickyTupletOverwriteByDuration)
+{
+    for (NoteEntryMethod method : { NoteEntryMethod::BY_DURATION, NoteEntryMethod::RHYTHM }) {
+        MasterScore* score = stickyTupletScore(method, false);
+        ASSERT_TRUE(score);
+
+        // a bar of eighths, a sticky triplet on the first beat, then 4 eighths entered by duration:
+        // the 4th replaces the eighth on the second beat with the next triplet instead of adding to it
+        for (int i = 0; i < 8; ++i) {
+            enterNote(score, 62);
+        }
+        startStickyTuplet(score, Fraction(0, 1));
+        score->inputState().setNotes({ NoteVal(60) });
+        for (int i = 0; i < 4; ++i) {
+            score->transactionManager()->transaction(TranslatableString::untranslatable("Sticky tuplet tests"), [&](Transaction& tx) {
+                NoteInput::setDuration(tx, score, DurationType::V_EIGHTH);
+            });
+        }
+        expectValid(score);
+
+        ChordRest* cr = stickyCrAt(score, Fraction(1, 4));
+        ASSERT_TRUE(cr && cr->isChord());
+        EXPECT_EQ(toChord(cr)->notes().size(), 1u);
+        ASSERT_TRUE(cr->tuplet());
+        expectEighthTriplet(cr->tuplet(), Fraction(1, 4));
+        EXPECT_TRUE(score->inputState().stickyTuplet());
+
+        delete score;
+    }
+}
+
+TEST_F(Engraving_TupletTests, stickyTupletSpillOver)
+{
+    MasterScore* score = stickyTupletScore();
+    ASSERT_TRUE(score);
+
+    // an eighth, then a half note on the 2nd eighth of the triplet: a quarter at the end of this
+    // triplet, tied to a quarter in the next one
+    enterNote(score, 60);
+    score->inputState().setDuration(DurationType::V_HALF);
+    enterNote(score, 62);
+    expectValid(score);
+
+    Tuplet* first = stickyCrAt(score, Fraction(0, 1))->tuplet();
+    ASSERT_TRUE(first);
+    expectEighthTriplet(first, Fraction(0, 1));
+    ASSERT_EQ(first->elements().size(), 2u);
+    ASSERT_TRUE(first->elements().at(1)->isChord());
+    Chord* tiedFrom = toChord(first->elements().at(1));
+    EXPECT_EQ(tiedFrom->durationType().type(), DurationType::V_QUARTER);
+
+    ChordRest* next = stickyCrAt(score, Fraction(1, 4));
+    ASSERT_TRUE(next);
+    ASSERT_TRUE(next->isChord());
+    ASSERT_TRUE(next->tuplet());
+    expectEighthTriplet(next->tuplet(), Fraction(1, 4));
+    EXPECT_EQ(next->durationType().type(), DurationType::V_QUARTER);
+    ASSERT_TRUE(tiedFrom->upNote()->tieFor());
+    EXPECT_EQ(tiedFrom->upNote()->tieFor()->endNote(), toChord(next)->upNote());
+    // the rest of the second triplet is a rest
+    ASSERT_EQ(next->tuplet()->elements().size(), 2u);
+    EXPECT_TRUE(next->tuplet()->elements().at(1)->isRest());
+
+    delete score;
+}
+
+TEST_F(Engraving_TupletTests, stickyTupletNoRoom)
+{
+    MasterScore* score = stickyTupletScore(NoteEntryMethod::BY_NOTE_NAME, false);
+    ASSERT_TRUE(score);
+    InputState& is = score->inputState();
+
+    // 5 ordinary eighths, a sticky triplet up to 7/8, then the next triplet doesn't fit
+    for (int i = 0; i < 5; ++i) {
+        enterNote(score);
+    }
+    startStickyTuplet(score, Fraction(5, 8));
+    for (int i = 0; i < 3; ++i) {
+        enterNote(score);
+    }
+    MScore::setError(MsError::MS_NO_ERROR);
+
+    // nothing is entered, and sticky tuplet input stays on until the user ends it
+    enterNote(score);
+    expectValid(score);
+    EXPECT_EQ(MScore::_error, MsError::NO_SPACE_FOR_STICKY_TUPLET);
+    MScore::setError(MsError::MS_NO_ERROR);
+    ChordRest* last = stickyCrAt(score, Fraction(7, 8));
+    ASSERT_TRUE(last);
+    EXPECT_TRUE(last->isRest());
+    EXPECT_TRUE(is.stickyTuplet());
+    EXPECT_EQ(is.tick(), Fraction(7, 8));
+
+    // a rest neither
+    score->transactionManager()->transaction(TranslatableString::untranslatable("Sticky tuplet tests"), [&](Transaction&) {
+        score->enterRest(TDuration(DurationType::V_EIGHTH));
+    });
+    EXPECT_EQ(MScore::_error, MsError::NO_SPACE_FOR_STICKY_TUPLET);
+    MScore::setError(MsError::MS_NO_ERROR);
+    EXPECT_EQ(rhythm(measureAt(score, 0)), "8 8 8 8 8 3:2[8 8 8] r8");
+
+    // after ending it, an ordinary note
+    is.setStickyTuplet(std::nullopt);
+    enterNote(score);
+    expectValid(score);
+    EXPECT_EQ(MScore::_error, MsError::MS_NO_ERROR);
+    last = stickyCrAt(score, Fraction(7, 8));
+    ASSERT_TRUE(last);
+    EXPECT_TRUE(last->isChord());
+    EXPECT_FALSE(last->tuplet());
+
+    delete score;
+}
+
+TEST_F(Engraving_TupletTests, stickyTupletNoRoomChord)
+{
+    MasterScore* score = stickyTupletScore(NoteEntryMethod::BY_NOTE_NAME, false);
+    ASSERT_TRUE(score);
+
+    // where the next triplet doesn't fit, a note can still be added to the chord just entered
+    for (int i = 0; i < 5; ++i) {
+        enterNote(score);
+    }
+    startStickyTuplet(score, Fraction(5, 8));
+    for (int i = 0; i < 3; ++i) {
+        enterNote(score);
+    }
+    MScore::setError(MsError::MS_NO_ERROR);
+    enterNote(score, 64, true);
+    expectValid(score);
+    EXPECT_EQ(MScore::_error, MsError::MS_NO_ERROR);
+    const ChordRest* cr = score->inputState().lastSegment()->cr(0);
+    ASSERT_TRUE(cr && cr->isChord());
+    EXPECT_EQ(toChord(cr)->notes().size(), 2u);
+
+    delete score;
+}
+
+TEST_F(Engraving_TupletTests, stickyTupletNoRoomSpillOver)
+{
+    MasterScore* score = stickyTupletScore(NoteEntryMethod::BY_NOTE_NAME, false);
+    ASSERT_TRUE(score);
+    InputState& is = score->inputState();
+
+    // in the last triplet that fits, a half note would continue in a triplet that doesn't: nothing is entered
+    for (int i = 0; i < 5; ++i) {
+        enterNote(score);
+    }
+    startStickyTuplet(score, Fraction(5, 8));
+    MScore::setError(MsError::MS_NO_ERROR);
+    is.setDuration(DurationType::V_HALF);
+    enterNote(score);
+    expectValid(score);
+    EXPECT_EQ(MScore::_error, MsError::NO_SPACE_FOR_STICKY_TUPLET);
+    MScore::setError(MsError::MS_NO_ERROR);
+    EXPECT_EQ(rhythm(measureAt(score, 0)), "8 8 8 8 8 3:2[r8 r8 r8] r8");
+
+    // a quarter fills the triplet
+    is.setDuration(DurationType::V_QUARTER);
+    enterNote(score);
+    expectValid(score);
+    EXPECT_EQ(MScore::_error, MsError::MS_NO_ERROR);
+
+    delete score;
+}
+
+TEST_F(Engraving_TupletTests, stickyTupletNoRoomByDuration)
+{
+    for (NoteEntryMethod method : { NoteEntryMethod::BY_DURATION, NoteEntryMethod::RHYTHM }) {
+        MasterScore* score = pendingTupletScore(method);
+        ASSERT_TRUE(score);
+        InputState& is = score->inputState();
+
+        // a quarter, then sticky quarter triplets from beat 2: the second one doesn't fit
+        pressDuration(score, DurationType::V_QUARTER);
+        setPendingStickyTriplet(score);
+        for (int i = 0; i < 3; ++i) {
+            pressDuration(score, DurationType::V_QUARTER);
+        }
+        EXPECT_EQ(rhythm(measureAt(score, 0)), "4 3:2[4 4 4] r4");
+        MScore::setError(MsError::MS_NO_ERROR);
+
+        // a duration key enters nothing and leaves the input duration as it was
+        pressDuration(score, DurationType::V_EIGHTH);
+        expectValid(score);
+        EXPECT_EQ(MScore::_error, MsError::NO_SPACE_FOR_STICKY_TUPLET);
+        MScore::setError(MsError::MS_NO_ERROR);
+        EXPECT_EQ(rhythm(measureAt(score, 0)), "4 3:2[4 4 4] r4");
+        EXPECT_EQ(is.duration().type(), DurationType::V_QUARTER);
+        EXPECT_TRUE(is.stickyTuplet());
+
+        // a rest neither
+        is.setRest(true);
+        pressDuration(score, DurationType::V_EIGHTH);
+        is.setRest(false);
+        EXPECT_EQ(MScore::_error, MsError::NO_SPACE_FOR_STICKY_TUPLET);
+        MScore::setError(MsError::MS_NO_ERROR);
+        EXPECT_EQ(rhythm(measureAt(score, 0)), "4 3:2[4 4 4] r4");
+
+        // after ending sticky tuplet input, an ordinary eighth
+        is.setStickyTuplet(std::nullopt);
+        pressDuration(score, DurationType::V_EIGHTH);
+        expectValid(score);
+        EXPECT_EQ(MScore::_error, MsError::MS_NO_ERROR);
+        EXPECT_EQ(rhythm(measureAt(score, 0)), "4 3:2[4 4 4] 8 r8");
+
+        delete score;
+    }
+}
+
+TEST_F(Engraving_TupletTests, stickyTupletMeasureRepeat)
+{
+    // whole-bar half-note triplets reach bar 2, which has a measure repeat: by entering a note there
+    // (by duration and rhythm add the tuplet before the note), or by a note spilling over into it
+    for (NoteEntryMethod method : { NoteEntryMethod::BY_DURATION, NoteEntryMethod::RHYTHM, NoteEntryMethod::BY_NOTE_NAME }) {
+        MasterScore* score = stickyTupletScore(method, false);
+        ASSERT_TRUE(score);
+        Measure* bar2 = score->tick2measure(Fraction(1, 1));
+        score->transactionManager()->transaction(TranslatableString::untranslatable("Sticky tuplet tests"), [&](Transaction& tx) {
+            EditMeasureRepeat::addMeasureRepeat(tx, score, bar2, 1, 0);
+        });
+        ASSERT_TRUE(bar2->isMeasureRepeatGroup(0));
+
+        const Tuplet* tuplet = nullptr;
+        score->transactionManager()->transaction(TranslatableString::untranslatable("Sticky tuplet tests"), [&](Transaction&) {
+            tuplet = score->addTuplet(stickyCrAt(score, Fraction(0, 1)), Fraction(3, 2), TDuration(DurationType::V_HALF),
+                                      TupletNumberType::SHOW_NUMBER, TupletBracketType::AUTO_BRACKET);
+        });
+        ASSERT_TRUE(tuplet);
+        InputState& is = score->inputState();
+        is.setSegment(score->tick2segment(Fraction(0, 1), false, SegmentType::ChordRest));
+        is.setStickyTuplet(StickyTuplet::of(tuplet));
+        is.setNotes({ NoteVal(60) });
+
+        // by note name, the third note is a whole note that spills over into bar 2
+        const bool spillOver = method == NoteEntryMethod::BY_NOTE_NAME;
+        for (int i = 0; i < (spillOver ? 3 : 4); ++i) {
+            const DurationType d = (spillOver && i == 2) ? DurationType::V_WHOLE : DurationType::V_HALF;
+            if (spillOver) {
+                is.setDuration(d);
+                enterNote(score);
+            } else {
+                score->transactionManager()->transaction(TranslatableString::untranslatable("Sticky tuplet tests"),
+                                                         [&](Transaction& tx) {
+                    NoteInput::setDuration(tx, score, d);
+                });
+            }
+        }
+        expectValid(score);
+
+        // the measure repeat is gone, and the sticky tuplet is in bar 2
+        EXPECT_FALSE(bar2->isMeasureRepeatGroup(0));
+        ChordRest* cr = stickyCrAt(score, Fraction(1, 1));
+        ASSERT_TRUE(cr);
+        EXPECT_TRUE(cr->isChord());
+        ASSERT_TRUE(cr->tuplet());
+        EXPECT_EQ(cr->tuplet()->tick(), Fraction(1, 1));
+        EXPECT_EQ(cr->tuplet()->ratio(), Fraction(3, 2));
+        EXPECT_TRUE(is.stickyTuplet());
+
+        delete score;
+    }
+}
+
+TEST_F(Engraving_TupletTests, stickyTupletChord)
+{
+    MasterScore* score = stickyTupletScore();
+    ASSERT_TRUE(score);
+
+    // adding a note to the chord doesn't create another tuplet
+    for (int i = 0; i < 3; ++i) {
+        enterNote(score, 60);
+    }
+    enterNote(score, 62);
+    enterNote(score, 66, true);
+    enterNote(score, 64);
+    expectValid(score);
+
+    ChordRest* first = stickyCrAt(score, Fraction(1, 4));
+    ASSERT_TRUE(first && first->isChord());
+    EXPECT_EQ(toChord(first)->notes().size(), 2u);
+    Tuplet* tuplet = first->tuplet();
+    ASSERT_TRUE(tuplet);
+    expectEighthTriplet(tuplet, Fraction(1, 4));
+    EXPECT_TRUE(tuplet->elements().at(1)->isChord());
+    EXPECT_EQ(toChordRest(tuplet->elements().at(1))->tuplet(), tuplet);
+
+    delete score;
+}
+
+TEST_F(Engraving_TupletTests, stickyTupletUndo)
+{
+    MasterScore* score = stickyTupletScore();
+    ASSERT_TRUE(score);
+
+    // the next triplet and its first note are undone in one step
+    for (int i = 0; i < 4; ++i) {
+        enterNote(score);
+    }
+    ASSERT_TRUE(stickyCrAt(score, Fraction(1, 4))->tuplet());
+    score->undoRedo(true, nullptr);
+    expectValid(score);
+
+    ChordRest* cr = stickyCrAt(score, Fraction(1, 4));
+    ASSERT_TRUE(cr);
+    EXPECT_TRUE(cr->isRest());
+    EXPECT_FALSE(cr->tuplet());
+    EXPECT_TRUE(score->inputState().stickyTuplet());
+
+    delete score;
+}
+
+TEST_F(Engraving_TupletTests, stickyTupletUndoAfterStop)
+{
+    MasterScore* score = stickyTupletScore();
+    ASSERT_TRUE(score);
+
+    // undo and redo don't restart sticky tuplet input stopped after the last note, e.g. with Escape
+    for (int i = 0; i < 4; ++i) {
+        enterNote(score);
+    }
+    score->inputState().setStickyTuplet(std::nullopt);
+    score->undoRedo(true, nullptr);
+    EXPECT_FALSE(score->inputState().stickyTuplet());
+    score->undoRedo(false, nullptr);
+    EXPECT_FALSE(score->inputState().stickyTuplet());
+    score->undoRedo(true, nullptr);
+
+    // the next note is an ordinary eighth
+    enterNote(score);
+    expectValid(score);
+
+    ChordRest* cr = stickyCrAt(score, Fraction(1, 4));
+    ASSERT_TRUE(cr);
+    EXPECT_TRUE(cr->isChord());
+    EXPECT_FALSE(cr->tuplet());
+
+    delete score;
+}
+
+TEST_F(Engraving_TupletTests, stickyTupletMouse)
+{
+    MasterScore* score = stickyTupletScore();
+    ASSERT_TRUE(score);
+
+    // a triplet, then a note entered with the mouse straight after it starts the next triplet
+    for (int i = 0; i < 3; ++i) {
+        enterNote(score);
+    }
+    Position pos;
+    pos.segment = score->tick2segment(Fraction(1, 4), false, SegmentType::ChordRest);
+    pos.staffIdx = 0;
+    pos.line = 4;
+    score->transactionManager()->transaction(TranslatableString::untranslatable("Sticky tuplet tests"), [&](Transaction& tx) {
+        NoteInput::putNote(tx, score, pos, false);
+    });
+    expectValid(score);
+
+    ChordRest* cr = stickyCrAt(score, Fraction(1, 4));
+    ASSERT_TRUE(cr);
+    EXPECT_TRUE(cr->isChord());
+    ASSERT_TRUE(cr->tuplet());
+    expectEighthTriplet(cr->tuplet(), Fraction(1, 4));
+
+    delete score;
+}
+
+TEST_F(Engraving_TupletTests, stickyTupletsAllowed)
+{
+    InputState is;
+    const std::vector<std::pair<NoteEntryMethod, bool> > methods {
+        { NoteEntryMethod::BY_NOTE_NAME, true }, { NoteEntryMethod::BY_DURATION, true }, { NoteEntryMethod::RHYTHM, true },
+        { NoteEntryMethod::REPITCH, false }, { NoteEntryMethod::REALTIME_AUTO, false }, { NoteEntryMethod::REALTIME_MANUAL, false },
+        { NoteEntryMethod::TIMEWISE, true } };
+    for (const auto& [method, allowed] : methods) {
+        is.setNoteEntryMethod(method);
+        EXPECT_EQ(is.stickyTupletsAllowed(), allowed);
+    }
+}
+
+TEST_F(Engraving_TupletTests, stickyTupletInsertMode)
+{
+    MasterScore* score = stickyTupletScore(NoteEntryMethod::BY_NOTE_NAME, false);
+    ASSERT_TRUE(score);
+    InputState& is = score->inputState();
+
+    // 5 eighths and a sticky triplet up to 7/8, where the next triplet doesn't fit
+    for (int i = 0; i < 5; ++i) {
+        enterNote(score);
+    }
+    startStickyTuplet(score, Fraction(5, 8));
+    for (int i = 0; i < 3; ++i) {
+        enterNote(score);
+    }
+
+    // in Insert mode, the run goes on: the next triplet's whole time is inserted, which lengthens the bar
+    is.setNoteEntryMethod(NoteEntryMethod::TIMEWISE);
+    score->select(stickyCrAt(score, Fraction(7, 8)));
+    MScore::setError(MsError::MS_NO_ERROR);
+    insertLetter(score);
+    expectValid(score);
+    EXPECT_EQ(MScore::_error, MsError::MS_NO_ERROR);
+    EXPECT_EQ(rhythm(measureAt(score, 0)), "8 8 8 8 8 3:2[8 8 8] 3:2[8 r8 r8] r8");
+    EXPECT_EQ(measureAt(score, 0)->ticks(), Fraction(5, 4));
+    EXPECT_TRUE(is.stickyTuplet());
+
+    // the next notes fill it, then the next one inserts another triplet
+    for (int i = 0; i < 3; ++i) {
+        insertLetter(score);
+    }
+    expectValid(score);
+    EXPECT_EQ(rhythm(measureAt(score, 0)), "8 8 8 8 8 3:2[8 8 8] 3:2[8 8 8] 3:2[8 r8 r8] r8");
+    EXPECT_EQ(measureAt(score, 0)->ticks(), Fraction(3, 2));
+
+    delete score;
+}
+
+TEST_F(Engraving_TupletTests, stickyTupletInsertModeRest)
+{
+    MasterScore* score = stickyTupletScore();
+    ASSERT_TRUE(score);
+    InputState& is = score->inputState();
+
+    // a sticky triplet, then quarters C D E in Insert mode, back on C
+    for (int i = 0; i < 3; ++i) {
+        enterNote(score);
+    }
+    const StickyTuplet sticky = *is.stickyTuplet();
+    is.setStickyTuplet(std::nullopt);
+    is.setDuration(DurationType::V_QUARTER);
+    for (int pitch : { 60, 62, 64 }) {
+        enterNote(score, pitch);
+    }
+    ASSERT_EQ(rhythm(measureAt(score, 0)), "3:2[8 8 8] 4 4 4");
+    is.setNoteEntryMethod(NoteEntryMethod::TIMEWISE);
+    is.setSegment(score->tick2segment(Fraction(1, 4), false, SegmentType::ChordRest));
+    score->select(toChord(is.cr())->upNote());
+    is.setStickyTuplet(sticky);
+
+    // a half rest inserts the next triplet's time, and fills the triplet without going past it
+    is.setDuration(DurationType::V_HALF);
+    enterRest(score);
+    expectValid(score);
+    EXPECT_EQ(rhythm(measureAt(score, 0)), "3:2[8 8 8] 3:2[r4.] 4 4 4");
+    EXPECT_EQ(measureAt(score, 0)->ticks(), Fraction(5, 4));
+
+    delete score;
+}
+
+TEST_F(Engraving_TupletTests, stickyTupletInsertFlag)
+{
+    MasterScore* score = stickyTupletScore(NoteEntryMethod::BY_NOTE_NAME);
+    ASSERT_TRUE(score);
+    InputState& is = score->inputState();
+
+    // a sticky triplet, then a quarter G without sticky tuplets
+    for (int i = 0; i < 3; ++i) {
+        enterNote(score, 60 + i);
+    }
+    const StickyTuplet sticky = *is.stickyTuplet();
+    is.setStickyTuplet(std::nullopt);
+    is.setDuration(DurationType::V_QUARTER);
+    enterNote(score, 67);
+    ASSERT_EQ(rhythm(measureAt(score, 0)), "3:2[8 8 8] 4 r2");
+
+    // back after the triplet, Ctrl+Shift+letter (insert) inserts the next sticky triplet's whole time: G stays a quarter
+    is.setSegment(score->tick2segment(Fraction(1, 4), false, SegmentType::ChordRest));
+    score->select(toChord(is.cr())->upNote());
+    is.setDuration(DurationType::V_EIGHTH);
+    is.setStickyTuplet(sticky);
+    MScore::setError(MsError::MS_NO_ERROR);
+    insertLetter(score, true);
+    expectValid(score);
+    EXPECT_EQ(MScore::_error, MsError::MS_NO_ERROR);
+    EXPECT_EQ(rhythm(measureAt(score, 0)), "3:2[8 8 8] 3:2[8 r8 r8] 4 r2");
+    EXPECT_EQ(measureAt(score, 0)->ticks(), Fraction(5, 4));
+
+    // the next letters fill it as before
+    enterNote(score, 62);
+    expectValid(score);
+    EXPECT_EQ(rhythm(measureAt(score, 0)), "3:2[8 8 8] 3:2[8 8 r8] 4 r2");
+
+    delete score;
+}
+
+// a sticky triplet, then quarters C D E, in Insert input on C with the eighth triplet run going on
+static MasterScore* stickyTupletInsertScore()
+{
+    MasterScore* score = stickyTupletScore();
+    if (!score) {
+        return nullptr;
+    }
+    InputState& is = score->inputState();
+    for (int i = 0; i < 3; ++i) {
+        enterNote(score);
+    }
+    const StickyTuplet sticky = *is.stickyTuplet();
+    is.setStickyTuplet(std::nullopt);
+    is.setDuration(DurationType::V_QUARTER);
+    for (int pitch : { 60, 62, 64 }) {
+        enterNote(score, pitch);
+    }
+    is.setNoteEntryMethod(NoteEntryMethod::TIMEWISE);
+    is.setSegment(score->tick2segment(Fraction(1, 4), false, SegmentType::ChordRest));
+    score->select(toChord(is.cr())->upNote());
+    is.setDuration(DurationType::V_EIGHTH);
+    is.setStickyTuplet(sticky);
+    return score;
+}
+
+TEST_F(Engraving_TupletTests, stickyTupletInsertModeMidiAndRepeat)
+{
+    // a note from a MIDI keyboard, or R, inserts the next triplet's time as a letter does: C, D and E are kept
+    for (bool repeat : { false, true }) {
+        MasterScore* score = stickyTupletInsertScore();
+        ASSERT_TRUE(score);
+        ASSERT_EQ(rhythm(measureAt(score, 0)), "3:2[8 8 8] 4 4 4");
+        MScore::setError(MsError::MS_NO_ERROR);
+        if (repeat) {
+            repeatChord(score, toChord(chordRestAt(measureAt(score, 0), 2)));
+        } else {
+            enterNote(score, 67);
+        }
+        expectValid(score);
+        EXPECT_EQ(MScore::_error, MsError::MS_NO_ERROR);
+        EXPECT_EQ(rhythm(measureAt(score, 0)), "3:2[8 8 8] 3:2[8 r8 r8] 4 4 4");
+        EXPECT_EQ(measureAt(score, 0)->ticks(), Fraction(5, 4));
+
+        // the next ones fill it
+        enterNote(score, 67);
+        expectValid(score);
+        EXPECT_EQ(rhythm(measureAt(score, 0)), "3:2[8 8 8] 3:2[8 8 r8] 4 4 4");
+        delete score;
+    }
+}
+
+TEST_F(Engraving_TupletTests, stickyTupletInsertModeMidiAtBarEnd)
+{
+    // on beat 4, where a quarter triplet's time doesn't fit before the barline, MIDI inserts it as a letter does
+    MasterScore* score = pendingTupletInsertScore(Fraction(3, 4));
+    ASSERT_TRUE(score);
+    InputState& is = score->inputState();
+    is.setDuration(DurationType::V_QUARTER);
+    is.resumeStickyTuplet(StickyTuplet { { QUARTER_TRIPLET } });
+    EXPECT_TRUE(NoteInput::nextStickyTupletFits(score, is));
+    MScore::setError(MsError::MS_NO_ERROR);
+    enterNote(score, 67);
+    expectValid(score);
+    EXPECT_EQ(MScore::_error, MsError::MS_NO_ERROR);
+    EXPECT_EQ(rhythm(measureAt(score, 0)), "4 4 4 3:2[4 r4 r4] 4");
+    EXPECT_EQ(measureAt(score, 0)->ticks(), Fraction(3, 2));
+
+    delete score;
+}
+
+TEST_F(Engraving_TupletTests, stickyTupletInsertModeTabFret)
+{
+    // a fret on the tablature staff inserts the next triplet's time, on both staves
+    MasterScore* score = stickyTupletScoreFrom(u"stickyTupletLinkedTab.mscx", VOICES);
+    ASSERT_TRUE(score);
+    InputState& is = score->inputState();
+    is.setString(2);
+    is.setDuration(DurationType::V_QUARTER);
+    for (int i = 0; i < 4; ++i) {
+        score->transactionManager()->transaction(TranslatableString::untranslatable("Sticky tuplet tests"), [&](Transaction& tx) {
+            NoteInput::addFret(tx, score, 3);
+        });
+        is.moveToNextInputPos();
+    }
+    ASSERT_EQ(rhythm(measureAt(score, 0), VOICES), "4 4 4 4");
+    is.setNoteEntryMethod(NoteEntryMethod::TIMEWISE);
+    is.setTrack(VOICES);
+    is.setSegment(score->tick2segment(Fraction(1, 4), false, SegmentType::ChordRest));
+    is.setDuration(DurationType::V_EIGHTH);
+    is.resumeStickyTuplet(StickyTuplet { { EIGHTH_TRIPLET } });
+    score->transactionManager()->transaction(TranslatableString::untranslatable("Sticky tuplet tests"), [&](Transaction& tx) {
+        NoteInput::addFret(tx, score, 5);
+    });
+    expectValid(score);
+    EXPECT_EQ(rhythm(measureAt(score, 0), VOICES), "4 3:2[8 r8 r8] 4 4 4");
+    EXPECT_EQ(rhythm(measureAt(score, 0), 0), "4 3:2[8 r8 r8] 4 4 4");
+
+    delete score;
+}
+
+TEST_F(Engraving_TupletTests, stickyTupletInsertOtherVoiceTuplet)
+{
+    // a quarter triplet on beats 1-2 in voice 2: inserting the next sticky triplet's time on beat 2 would split it, so a
+    // letter, a rest or a MIDI note there is refused, as a waiting tuplet is
+    for (int entry = 0; entry < 3; ++entry) {
+        MasterScore* score = pendingTupletScore(NoteEntryMethod::BY_NOTE_NAME);
+        ASSERT_TRUE(score);
+        InputState& is = score->inputState();
+        for (int pitch : { 60, 62, 64, 65 }) {
+            enterNote(score, pitch);
+        }
+        is.setTrack(1);
+        is.setSegment(score->tick2segment(Fraction(0, 1), false, SegmentType::ChordRest));
+        ASSERT_TRUE(waitForTuplet(score, true));
+        for (int i = 0; i < 3; ++i) {
+            enterNote(score, 55);
+        }
+        ASSERT_TRUE(score->sanityCheck());
+
+        is.setTrack(0);
+        is.setNoteEntryMethod(NoteEntryMethod::TIMEWISE);
+        is.setSegment(score->tick2segment(Fraction(1, 4), false, SegmentType::ChordRest));
+        score->select(toChord(is.cr())->upNote());
+        is.setTrack(0);
+        is.setDuration(DurationType::V_EIGHTH);
+        is.resumeStickyTuplet(StickyTuplet { { EIGHTH_TRIPLET } });
+        EXPECT_FALSE(NoteInput::nextStickyTupletFits(score, is));
+        MScore::setError(MsError::MS_NO_ERROR);
+        if (entry == 0) {
+            insertLetter(score);
+        } else if (entry == 1) {
+            enterRest(score);
+        } else {
+            enterNote(score, 67);
+        }
+        expectValid(score);
+        EXPECT_EQ(MScore::_error, MsError::CANNOT_INSERT_TUPLET);
+        EXPECT_EQ(rhythm(measureAt(score, 0)), "4 4 4 4");
+        EXPECT_EQ(rhythm(measureAt(score, 0), 1), "3:2[4 4 4] r2");
+        MScore::setError(MsError::MS_NO_ERROR);
+
+        delete score;
+    }
+}
+
+TEST_F(Engraving_TupletTests, stickyTupletInsertWhereOtherVoiceTupletStarts)
+{
+    // a quarter triplet on beats 2-3 in voice 2; the run's first triplet, inserted on beat 2, moves it to start at the
+    // input position, where the next sticky triplet is inserted before it too
+    MasterScore* score = pendingTupletScore(NoteEntryMethod::BY_NOTE_NAME);
+    ASSERT_TRUE(score);
+    InputState& is = score->inputState();
+    for (int pitch : { 60, 62, 64, 65 }) {
+        enterNote(score, pitch);
+    }
+    is.setTrack(1);
+    is.setSegment(score->tick2segment(Fraction(1, 4), false, SegmentType::ChordRest));
+    ASSERT_TRUE(waitForTuplet(score, true));
+    for (int i = 0; i < 3; ++i) {
+        enterNote(score, 55);
+    }
+    ASSERT_TRUE(score->sanityCheck());
+
+    is.setTrack(0);
+    is.setNoteEntryMethod(NoteEntryMethod::TIMEWISE);
+    is.setSegment(score->tick2segment(Fraction(1, 4), false, SegmentType::ChordRest));
+    score->select(toChord(is.cr())->upNote());
+    is.setTrack(0);
+    is.setDuration(DurationType::V_EIGHTH);
+    is.resumeStickyTuplet(StickyTuplet { { EIGHTH_TRIPLET } });
+    for (int i = 0; i < 3; ++i) {
+        insertLetter(score);
+    }
+    EXPECT_TRUE(NoteInput::nextStickyTupletFits(score, is));
+    MScore::setError(MsError::MS_NO_ERROR);
+    insertLetter(score);
+    expectValid(score);
+    EXPECT_EQ(MScore::_error, MsError::MS_NO_ERROR);
+    EXPECT_EQ(rhythm(measureAt(score, 0)), "4 3:2[8 8 8] 3:2[8 r8 r8] 4 4 4");
+    EXPECT_EQ(rhythm(measureAt(score, 0), 1), "r4 r4 r4 3:2[4 4 4] r4");
+
+    delete score;
+}
+
+TEST_F(Engraving_TupletTests, stickyTupletInsertModeClickElsewhere)
+{
+    // a click on E, which isn't straight after a triplet, inserts the note alone and ends the run
+    MasterScore* score = stickyTupletInsertScore();
+    ASSERT_TRUE(score);
+    InputState& is = score->inputState();
+    Position pos;
+    pos.segment = score->tick2segment(Fraction(3, 4), false, SegmentType::ChordRest);
+    pos.staffIdx = 0;
+    pos.line = 6;
+    score->transactionManager()->transaction(TranslatableString::untranslatable("Sticky tuplet tests"), [&](Transaction& tx) {
+        NoteInput::insertChordByInsertingTime(tx, score, pos);
+    });
+    expectValid(score);
+    EXPECT_EQ(rhythm(measureAt(score, 0)), "3:2[8 8 8] 4 4 8 4");
+    EXPECT_FALSE(is.stickyTuplet());
+
+    delete score;
+}
+
+TEST_F(Engraving_TupletTests, stickyTupletInsertModeTie)
+{
+    // the tie key inserts the next triplet's time at the input position and ties the note before it into it
+    MasterScore* score = stickyTupletInsertScore();
+    ASSERT_TRUE(score);
+    EditTie::cmdAddTie(score);
+    expectValid(score);
+    EXPECT_EQ(rhythm(measureAt(score, 0)), "3:2[8 8 8] 3:2[8 r8 r8] 4 4 4");
+    const ChordRest* tied = chordRestAt(measureAt(score, 0), 3);
+    ASSERT_TRUE(tied && tied->isChord());
+    ASSERT_TRUE(toChord(tied)->upNote()->tieBack());
+    EXPECT_EQ(toChord(tied)->upNote()->tieBack()->startNote(), toChord(chordRestAt(measureAt(score, 0), 2))->upNote());
+
+    delete score;
+}
+
+// a second staff in the first part, as in a piano score
+static void addLowerStaff(MasterScore* score)
+{
+    score->startCmd(TranslatableString::untranslatable("Sticky tuplet tests"));
+    Staff* staff = Factory::createStaff(score->staff(0)->part());
+    staff->setPart(score->staff(0)->part());
+    score->undoInsertStaff(staff, 1);
+    score->endCmd();
+}
+
+// like moving the last chord entered to the staff below
+static void moveLastChordDown(Score* score, const Fraction& tick)
+{
+    score->transactionManager()->transaction(TranslatableString::untranslatable("Sticky tuplet tests"), [&](Transaction&) {
+        score->undo(new ChangeChordStaffMove(toChord(stickyCrAt(score, tick)), 1));
+    });
+}
+
+TEST_F(Engraving_TupletTests, stickyTupletTieCrossStaffRefused)
+{
+    // the tie key after a cross-staff chord, where the next sticky triplet is refused: no space left in the bar, or
+    // Insert across another voice's tuplet; nothing changes
+    for (bool insert : { false, true }) {
+        MasterScore* score = stickyTupletScore(NoteEntryMethod::BY_NOTE_NAME, false);
+        ASSERT_TRUE(score);
+        addLowerStaff(score);
+        InputState& is = score->inputState();
+        if (insert) {
+            // voice 2: a quarter triplet on beats 1-2; the run's first triplet on beat 1 in voice 1
+            for (int pitch : { 60, 62, 64, 65 }) {
+                is.setDuration(DurationType::V_QUARTER);
+                enterNote(score, pitch);
+            }
+            is.setTrack(1);
+            is.setSegment(score->tick2segment(Fraction(0, 1), false, SegmentType::ChordRest));
+            ASSERT_TRUE(waitForTuplet(score, true));
+            for (int i = 0; i < 3; ++i) {
+                enterNote(score, 55);
+            }
+            is.setTrack(0);
+            is.setSegment(score->tick2segment(Fraction(0, 1), false, SegmentType::ChordRest));
+            score->select(toChord(is.cr())->upNote());
+            is.setTrack(0);
+            is.setDuration(DurationType::V_EIGHTH);
+            is.resumeStickyTuplet(StickyTuplet { { EIGHTH_TRIPLET } });
+            for (int i = 0; i < 3; ++i) {
+                enterNote(score);
+            }
+            is.setNoteEntryMethod(NoteEntryMethod::TIMEWISE);
+        } else {
+            // 5 eighths and a sticky triplet up to 7/8, where the next triplet doesn't fit
+            for (int i = 0; i < 5; ++i) {
+                enterNote(score);
+            }
+            startStickyTuplet(score, Fraction(5, 8));
+            for (int i = 0; i < 3; ++i) {
+                enterNote(score);
+            }
+        }
+        const Fraction lastTick = insert ? Fraction(1, 6) : Fraction(19, 24);
+        moveLastChordDown(score, lastTick);
+        ASSERT_TRUE(stickyCrAt(score, lastTick));
+        ASSERT_EQ(toChord(stickyCrAt(score, lastTick))->staffMove(), 1);
+        EXPECT_FALSE(NoteInput::nextStickyTupletFits(score, is));
+        const std::string before = rhythm(measureAt(score, 0));
+
+        MScore::setError(MsError::MS_NO_ERROR);
+        EditTie::cmdAddTie(score);
+        expectValid(score);
+        EXPECT_NE(MScore::_error, MsError::MS_NO_ERROR);
+        EXPECT_EQ(rhythm(measureAt(score, 0)), before);
+        EXPECT_FALSE(toChord(stickyCrAt(score, lastTick))->upNote()->tieFor());
+        MScore::setError(MsError::MS_NO_ERROR);
+
+        delete score;
+    }
+}
+
+TEST_F(Engraving_TupletTests, stickyTupletInsertModeLinkedTabUndo)
+{
+    // a guitar staff with a linked TAB staff: the triplet's time is inserted on both, and one undo removes it
+    MasterScore* score = ScoreRW::readScore(TUPLET_DATA_DIR + u"guitarLinkedTab.mscx");
+    ASSERT_TRUE(score);
+    InputState& is = score->inputState();
+    is.setTrack(0);
+    is.setSegment(score->tick2segment(Fraction(0, 1), false, SegmentType::ChordRest));
+    is.setDuration(DurationType::V_QUARTER);
+    is.setNoteEntryMode(true);
+    is.setNoteEntryMethod(NoteEntryMethod::BY_NOTE_NAME);
+    for (int pitch : { 64, 65, 67, 69 }) {
+        enterNote(score, pitch);
+    }
+    is.setNoteEntryMethod(NoteEntryMethod::TIMEWISE);
+    is.setSegment(score->tick2segment(Fraction(1, 4), false, SegmentType::ChordRest));
+    score->select(toChord(is.cr())->upNote());
+    is.setDuration(DurationType::V_EIGHTH);
+    is.resumeStickyTuplet(StickyTuplet { { EIGHTH_TRIPLET } });
+    insertLetter(score);
+    expectValid(score);
+    EXPECT_EQ(rhythm(score->firstMeasure()), "4 3:2[8 r8 r8] 4 4 4");
+    EXPECT_EQ(rhythm(score->firstMeasure(), VOICES), "4 3:2[8 r8 r8] 4 4 4");
+
+    score->undoRedo(true, nullptr);
+    expectValid(score);
+    EXPECT_EQ(rhythm(score->firstMeasure()), "4 4 4 4");
+    EXPECT_EQ(rhythm(score->firstMeasure(), VOICES), "4 4 4 4");
+    EXPECT_EQ(score->firstMeasure()->ticks(), Fraction(1, 1));
+    EXPECT_TRUE(is.stickyTuplet());
+
+    score->undoRedo(false, nullptr);
+    expectValid(score);
+    EXPECT_EQ(rhythm(score->firstMeasure()), "4 3:2[8 r8 r8] 4 4 4");
+    EXPECT_EQ(rhythm(score->firstMeasure(), VOICES), "4 3:2[8 r8 r8] 4 4 4");
+
+    delete score;
+}
+
+TEST_F(Engraving_TupletTests, stickyTupletEndsElsewhere)
+{
+    MasterScore* score = stickyTupletScore();
+    ASSERT_TRUE(score);
+
+    // a triplet, then the input position moves to the next bar
+    for (int i = 0; i < 3; ++i) {
+        enterNote(score);
+    }
+    score->inputState().setSegment(score->tick2segment(Fraction(1, 1), false, SegmentType::ChordRest));
+    enterNote(score);
+    expectValid(score);
+
+    ChordRest* cr = stickyCrAt(score, Fraction(1, 1));
+    ASSERT_TRUE(cr);
+    EXPECT_TRUE(cr->isChord());
+    EXPECT_FALSE(cr->tuplet());
+    EXPECT_FALSE(score->inputState().stickyTuplet());
+
+    delete score;
+}
+
+TEST_F(Engraving_TupletTests, stickyTupletContinuesInTuplet)
+{
+    MasterScore* score = stickyTupletScore();
+    ASSERT_TRUE(score);
+
+    // back to the start of the current triplet: the note is replaced and sticky input continues
+    enterNote(score, 60);
+    enterNote(score, 62);
+    score->inputState().setSegment(score->tick2segment(Fraction(0, 1), false, SegmentType::ChordRest));
+    enterNote(score, 64);
+    EXPECT_TRUE(score->inputState().stickyTuplet());
+
+    ChordRest* first = stickyCrAt(score, Fraction(0, 1));
+    ASSERT_TRUE(first && first->isChord());
+    EXPECT_EQ(toChord(first)->upNote()->pitch(), 64);
+    ASSERT_TRUE(first->tuplet());
+    EXPECT_EQ(first->tuplet()->elements().size(), 3u);
+
+    // straight after the triplet, the next one is created
+    score->inputState().setSegment(score->tick2segment(Fraction(1, 4), false, SegmentType::ChordRest));
+    enterNote(score, 65);
+    expectValid(score);
+    ChordRest* next = stickyCrAt(score, Fraction(1, 4));
+    ASSERT_TRUE(next);
+    ASSERT_TRUE(next->tuplet());
+    expectEighthTriplet(next->tuplet(), Fraction(1, 4));
+
+    delete score;
+}
+
+TEST_F(Engraving_TupletTests, stickyTupletResumed)
+{
+    MasterScore* score = stickyTupletScore();
+    ASSERT_TRUE(score);
+
+    // a triplet, then sticky tuplets off for a quarter note on beat 2
+    for (int i = 0; i < 3; ++i) {
+        enterNote(score, 60 + i);
+    }
+    InputState& is = score->inputState();
+    const StickyTuplet sticky = *is.stickyTuplet();
+    is.setStickyTuplet(std::nullopt);
+    is.setDuration(DurationType::V_QUARTER);
+    enterNote(score, 67);
+
+    // on again on beat 3: the run goes on there, though no triplet ends there
+    is.resumeStickyTuplet(sticky);
+    EXPECT_TRUE(is.stickyTupletContinues());
+    is.setDuration(DurationType::V_EIGHTH);
+    for (int i = 0; i < 4; ++i) {
+        enterNote(score, 60 + i);
+    }
+    expectValid(score);
+    EXPECT_TRUE(is.stickyTuplet());
+
+    ChordRest* quarter = stickyCrAt(score, Fraction(1, 4));
+    ASSERT_TRUE(quarter);
+    EXPECT_FALSE(quarter->tuplet());
+    EXPECT_EQ(quarter->ticks(), Fraction(1, 4));
+    for (const Fraction& tick : { Fraction(1, 2), Fraction(3, 4) }) {
+        ChordRest* cr = stickyCrAt(score, tick);
+        ASSERT_TRUE(cr);
+        expectEighthTriplet(cr->tuplet(), tick);
+    }
+
+    delete score;
+}
+
+TEST_F(Engraving_TupletTests, stickyTupletResumedEndsElsewhere)
+{
+    MasterScore* score = stickyTupletScore();
+    ASSERT_TRUE(score);
+
+    // resumed on beat 1 of bar 2, then the input position moves on to bar 3
+    InputState& is = score->inputState();
+    const StickyTuplet sticky = *is.stickyTuplet();
+    is.setStickyTuplet(std::nullopt);
+    is.setSegment(score->tick2segment(Fraction(1, 1), false, SegmentType::ChordRest));
+    is.resumeStickyTuplet(sticky);
+    is.setSegment(score->tick2segment(Fraction(2, 1), false, SegmentType::ChordRest));
+    EXPECT_FALSE(is.stickyTupletContinues());
+    enterNote(score);
+    expectValid(score);
+
+    ChordRest* cr = stickyCrAt(score, Fraction(2, 1));
+    ASSERT_TRUE(cr);
+    EXPECT_TRUE(cr->isChord());
+    EXPECT_FALSE(cr->tuplet());
+    EXPECT_FALSE(is.stickyTuplet());
+
+    delete score;
+}
+
+TEST_F(Engraving_TupletTests, stickyTupletResumedNested)
+{
+    MasterScore* score = stickyTupletScore(NoteEntryMethod::BY_NOTE_NAME, false);
+    ASSERT_TRUE(score);
+
+    // sticky eighth-note triplets inside a quarter-note triplet, stopped once it is full
+    ASSERT_TRUE(addTuplet(stickyCrAt(score, Fraction(0, 1)), Fraction(3, 2), TDuration(DurationType::V_QUARTER)));
+    startStickyTuplet(score, Fraction(0, 1));
+    for (int i = 0; i < 9; ++i) {
+        enterNote(score, 60 + i);
+    }
+    InputState& is = score->inputState();
+    const StickyTuplet sticky = *is.stickyTuplet();
+    ASSERT_EQ(sticky.levels.size(), 2u);
+    is.setStickyTuplet(std::nullopt);
+
+    // resumed in bar 2: the whole structure is created there
+    is.setSegment(score->tick2segment(Fraction(1, 1), false, SegmentType::ChordRest));
+    is.resumeStickyTuplet(sticky);
+    enterNote(score, 69);
+    expectValid(score);
+    EXPECT_TRUE(is.stickyTuplet());
+
+    ChordRest* cr = stickyCrAt(score, Fraction(1, 1));
+    ASSERT_TRUE(cr);
+    expectEighthTriplet(cr->tuplet(), Fraction(1, 1));
+    const Tuplet* outer = cr->tuplet()->tuplet();
+    ASSERT_TRUE(outer);
+    EXPECT_EQ(outer->tick(), Fraction(1, 1));
+    EXPECT_EQ(outer->ratio(), Fraction(3, 2));
+    EXPECT_EQ(outer->baseLen().type(), DurationType::V_QUARTER);
+
+    delete score;
+}
+
+TEST_F(Engraving_TupletTests, stickyTupletContinuingPausedNested)
+{
+    MasterScore* score = stickyTupletScore(NoteEntryMethod::BY_NOTE_NAME, false);
+    ASSERT_TRUE(score);
+
+    // sticky eighth-note triplets inside a quarter-note triplet
+    ASSERT_TRUE(addTuplet(stickyCrAt(score, Fraction(0, 1)), Fraction(3, 2), TDuration(DurationType::V_QUARTER)));
+    startStickyTuplet(score, Fraction(0, 1));
+    for (int i = 0; i < 9; ++i) {
+        enterNote(score, 60 + i);
+    }
+    const StickyTuplet sticky = *score->inputState().stickyTuplet();
+    ASSERT_EQ(sticky.levels.size(), 2u);
+    const Tuplet* inner = stickyCrAt(score, Fraction(0, 1))->tuplet();
+    ASSERT_TRUE(inner && inner->tuplet());
+    const Tuplet* outer = inner->tuplet();
+
+    // re-ticked straight after the outer tuplet, the paused run goes on with both levels
+    const StickyTuplet continued = StickyTuplet::continuing(outer, sticky);
+    ASSERT_EQ(continued.levels.size(), 2u);
+    EXPECT_EQ(continued.levels.back().baseLen.type(), DurationType::V_EIGHTH);
+
+    // with no paused run, or a different one, only the outer tuplet's own level
+    EXPECT_EQ(StickyTuplet::continuing(outer, std::nullopt).levels.size(), 1u);
+    StickyTuplet other = sticky;
+    other.levels.front().ratio = Fraction(5, 4);
+    EXPECT_EQ(StickyTuplet::continuing(outer, other).levels.size(), 1u);
+
+    // the inner tuplet has both levels anyway
+    EXPECT_EQ(StickyTuplet::continuing(inner, sticky).levels.size(), 2u);
+
+    delete score;
+}
+
+TEST_F(Engraving_TupletTests, stickyTupletInsideTuplet)
+{
+    MasterScore* score = stickyTupletScore(NoteEntryMethod::BY_NOTE_NAME, false);
+    ASSERT_TRUE(score);
+
+    // sticky eighth-note triplets inside a quarter-note triplet
+    ASSERT_TRUE(addTuplet(stickyCrAt(score, Fraction(0, 1)), Fraction(3, 2), TDuration(DurationType::V_QUARTER)));
+    const Tuplet* outer = stickyCrAt(score, Fraction(0, 1))->tuplet();
+    ASSERT_TRUE(outer);
+    startStickyTuplet(score, Fraction(0, 1));
+
+    // they continue until the quarter-note triplet is full
+    for (int i = 0; i < 9; ++i) {
+        enterNote(score, 60 + i);
+    }
+    expectValid(score);
+    for (int i = 0; i < 3; ++i) {
+        const Fraction tick = Fraction(i, 6);
+        ChordRest* cr = stickyCrAt(score, tick);
+        ASSERT_TRUE(cr);
+        expectEighthTriplet(cr->tuplet(), tick);
+        EXPECT_EQ(cr->tuplet()->tuplet(), outer);
+    }
+
+    // after it, the whole structure repeats: a new quarter-note triplet with an eighth-note triplet in it
+    enterNote(score, 69);
+    expectValid(score);
+    EXPECT_TRUE(score->inputState().stickyTuplet());
+    ChordRest* after = stickyCrAt(score, Fraction(1, 2));
+    ASSERT_TRUE(after);
+    expectEighthTriplet(after->tuplet(), Fraction(1, 2));
+    const Tuplet* newOuter = after->tuplet()->tuplet();
+    ASSERT_TRUE(newOuter);
+    EXPECT_NE(newOuter, outer);
+    EXPECT_EQ(newOuter->tick(), Fraction(1, 2));
+    EXPECT_EQ(newOuter->ratio(), Fraction(3, 2));
+    EXPECT_EQ(newOuter->baseLen().type(), DurationType::V_QUARTER);
+    EXPECT_FALSE(newOuter->tuplet());
+
+    delete score;
+}
+
+TEST_F(Engraving_TupletTests, stickyTupletInsideTupletSpillOver)
+{
+    MasterScore* score = stickyTupletScore(NoteEntryMethod::BY_NOTE_NAME, false);
+    ASSERT_TRUE(score);
+
+    // sticky eighth-note triplets inside a quarter-note triplet
+    ASSERT_TRUE(addTuplet(stickyCrAt(score, Fraction(0, 1)), Fraction(3, 2), TDuration(DurationType::V_QUARTER)));
+    startStickyTuplet(score, Fraction(0, 1));
+    for (int i = 0; i < 8; ++i) {
+        enterNote(score, 60 + i);
+    }
+
+    // a quarter note on the last eighth of the structure continues, tied, in a new one
+    score->inputState().setDuration(DurationType::V_QUARTER);
+    enterNote(score, 68);
+    expectValid(score);
+    EXPECT_TRUE(score->inputState().stickyTuplet());
+
+    ChordRest* next = stickyCrAt(score, Fraction(1, 2));
+    ASSERT_TRUE(next);
+    ASSERT_TRUE(next->isChord());
+    EXPECT_TRUE(toChord(next)->upNote()->tieBack());
+    expectEighthTriplet(next->tuplet(), Fraction(1, 2));
+    const Tuplet* newOuter = next->tuplet()->tuplet();
+    ASSERT_TRUE(newOuter);
+    EXPECT_EQ(newOuter->tick(), Fraction(1, 2));
+    EXPECT_EQ(newOuter->baseLen().type(), DurationType::V_QUARTER);
+
+    delete score;
+}
+
+TEST_F(Engraving_TupletTests, stickyTupletInsideTupletStopped)
+{
+    MasterScore* score = stickyTupletScore();
+    ASSERT_TRUE(score);
+    InputState& is = score->inputState();
+
+    // during sticky eighth-note triplets, a sixteenth-note triplet in the first eighth becomes the sticky tuplet
+    const Tuplet* inner = nullptr;
+    score->transactionManager()->transaction(TranslatableString::untranslatable("Sticky tuplet tests"), [&](Transaction&) {
+        inner = score->addTuplet(stickyCrAt(score, Fraction(0, 1)), Fraction(3, 2), TDuration(DurationType::V_16TH),
+                                 TupletNumberType::SHOW_NUMBER, TupletBracketType::AUTO_BRACKET);
+    });
+    ASSERT_TRUE(inner);
+    const Tuplet* outer = inner->tuplet();
+    ASSERT_TRUE(outer);
+    is.setSegment(score->tick2segment(Fraction(0, 1), false, SegmentType::ChordRest));
+    is.setDuration(DurationType::V_16TH);
+    is.setStickyTuplet(StickyTuplet::of(inner));
+
+    // five sticky sixteenths, then sticky input stops (Escape) and sixteenths go on past the eighth-note triplet
+    for (int i = 0; i < 5; ++i) {
+        enterNote(score, 60 + i);
+        expectValid(score);
+    }
+    is.setStickyTuplet(std::nullopt);
+    for (int i = 0; i < 9; ++i) {
+        enterNote(score, 65 + i);
+        expectValid(score);
+    }
+
+    // two sixteenth-note triplets in the first two eighths of the eighth-note triplet
+    for (int i = 0; i < 6; ++i) {
+        ChordRest* cr = stickyCrAt(score, Fraction(i, 36));
+        ASSERT_TRUE(cr && cr->isChord() && cr->tuplet());
+        EXPECT_EQ(cr->tuplet()->baseLen().type(), DurationType::V_16TH);
+        EXPECT_EQ(cr->tuplet()->tuplet(), outer);
+    }
+    // ordinary sixteenths in its last eighth
+    for (const Fraction& tick : { Fraction(4, 24), Fraction(5, 24) }) {
+        ChordRest* cr = stickyCrAt(score, tick);
+        ASSERT_TRUE(cr && cr->isChord());
+        EXPECT_EQ(cr->durationType().type(), DurationType::V_16TH);
+        EXPECT_EQ(cr->tuplet(), outer);
+    }
+    // ordinary sixteenths after it
+    for (int i = 4; i < 8; ++i) {
+        ChordRest* cr = stickyCrAt(score, Fraction(i, 16));
+        ASSERT_TRUE(cr && cr->isChord());
+        EXPECT_FALSE(cr->tuplet());
+    }
+
+    delete score;
+}
+
+TEST_F(Engraving_TupletTests, stickyTupletInsideTupletNoRoom)
+{
+    MasterScore* score = stickyTupletScore(NoteEntryMethod::BY_NOTE_NAME, false);
+    ASSERT_TRUE(score);
+
+    // a quarter note, then a quarter-note triplet from beat 2 with sticky eighth-note triplets in it
+    score->inputState().setDuration(DurationType::V_QUARTER);
+    enterNote(score, 60);
+    ASSERT_TRUE(addTuplet(stickyCrAt(score, Fraction(1, 4)), Fraction(3, 2), TDuration(DurationType::V_QUARTER)));
+    startStickyTuplet(score, Fraction(1, 4));
+
+    for (int i = 0; i < 9; ++i) {
+        enterNote(score, 62 + i);
+    }
+    expectValid(score);
+    EXPECT_TRUE(score->inputState().stickyTuplet());
+
+    // another quarter-note triplet doesn't fit before the barline: nothing is entered
+    MScore::setError(MsError::MS_NO_ERROR);
+    enterNote(score, 72);
+    expectValid(score);
+    EXPECT_EQ(MScore::_error, MsError::NO_SPACE_FOR_STICKY_TUPLET);
+    MScore::setError(MsError::MS_NO_ERROR);
+    EXPECT_TRUE(score->inputState().stickyTuplet());
+    ChordRest* after = stickyCrAt(score, Fraction(3, 4));
+    ASSERT_TRUE(after);
+    EXPECT_TRUE(after->isRest());
+
+    delete score;
+}
+
+TEST_F(Engraving_TupletTests, stickyTupletEndsOnVoiceChange)
+{
+    MasterScore* score = stickyTupletScore();
+    ASSERT_TRUE(score);
+
+    // in the middle of the triplet, input switches to voice 2: an ordinary note there, as without sticky input
+    enterNote(score, 60);
+    score->inputState().setTrack(1);
+    enterNote(score, 67);
+    expectValid(score);
+
+    Segment* s = score->tick2segment(Fraction(1, 12), false, SegmentType::ChordRest);
+    ASSERT_TRUE(s);
+    ChordRest* voice2 = toChordRest(s->element(1));
+    ASSERT_TRUE(voice2);
+    EXPECT_TRUE(voice2->isChord());
+    EXPECT_FALSE(voice2->tuplet());
+    EXPECT_FALSE(score->inputState().stickyTuplet());
+
+    delete score;
+}
+
+TEST_F(Engraving_TupletTests, stickyTupletLinkedTab)
+{
+    MasterScore* score = stickyTupletScoreFrom(u"stickyTupletLinkedTab.mscx", 0);
+    ASSERT_TRUE(score);
+
+    // notes entered on the standard staff: the sticky triplets are also created on the linked tablature staff
+    startStickyTuplet(score, Fraction(0, 1));
+    for (int i = 0; i < 4; ++i) {
+        enterNote(score, 64);
+    }
+    expectValid(score);
+
+    for (track_idx_t track : { track_idx_t(0), track_idx_t(VOICES) }) {
+        ChordRest* cr = stickyCrAt(score, Fraction(1, 4), track);
+        ASSERT_TRUE(cr);
+        EXPECT_TRUE(cr->isChord());
+        expectEighthTriplet(cr->tuplet(), Fraction(1, 4));
+    }
+
+    // undo removes the new triplet from both staves
+    score->undoRedo(true, nullptr);
+    expectValid(score);
+    for (track_idx_t track : { track_idx_t(0), track_idx_t(VOICES) }) {
+        ChordRest* cr = stickyCrAt(score, Fraction(1, 4), track);
+        ASSERT_TRUE(cr);
+        EXPECT_FALSE(cr->tuplet());
+    }
+
+    delete score;
+}
+
+TEST_F(Engraving_TupletTests, stickyTupletTabFrets)
+{
+    MasterScore* score = stickyTupletScoreFrom(u"stickyTupletLinkedTab.mscx", VOICES);
+    ASSERT_TRUE(score);
+
+    // frets entered on the tablature staff (moving on after each, as with the right arrow) continue the sticky triplets, on both staves
+    score->inputState().setString(2);
+    startStickyTuplet(score, Fraction(0, 1), VOICES);
+    for (int i = 0; i < 4; ++i) {
+        score->transactionManager()->transaction(TranslatableString::untranslatable("Sticky tuplet tests"), [&](Transaction& tx) {
+            NoteInput::addFret(tx, score, 3);
+        });
+        score->inputState().moveToNextInputPos();
+    }
+    expectValid(score);
+
+    ChordRest* tab = stickyCrAt(score, Fraction(1, 4), VOICES);
+    ASSERT_TRUE(tab);
+    ASSERT_TRUE(tab->isChord());
+    EXPECT_EQ(toChord(tab)->upNote()->fret(), 3);
+    expectEighthTriplet(tab->tuplet(), Fraction(1, 4));
+
+    ChordRest* standard = stickyCrAt(score, Fraction(1, 4), 0);
+    ASSERT_TRUE(standard);
+    EXPECT_TRUE(standard->isChord());
+    expectEighthTriplet(standard->tuplet(), Fraction(1, 4));
+
+    delete score;
+}
+
+TEST_F(Engraving_TupletTests, stickyTupletDrums)
+{
+    MasterScore* score = stickyTupletScoreFrom(u"tupletDrums.mscx", 0);
+    ASSERT_TRUE(score);
+
+    auto enterDrum = [score](int drumPitch) {
+        score->transactionManager()->transaction(TranslatableString::untranslatable("Sticky tuplet tests"), [&](Transaction& tx) {
+            NoteInput::addPitch(tx, score, NoteInputParams { 0, drumPitch }, false, false);
+        });
+    };
+
+    // instruments in the same voice (snare, hi-hat) continue the sticky triplets
+    startStickyTuplet(score, Fraction(0, 1));
+    for (int i = 0; i < 3; ++i) {
+        enterDrum(38);
+        enterDrum(42);
+    }
+    expectValid(score);
+
+    ChordRest* cr = stickyCrAt(score, Fraction(1, 4));
+    ASSERT_TRUE(cr);
+    ASSERT_TRUE(cr->isChord());
+    EXPECT_EQ(toChord(cr)->upNote()->pitch(), 42);
+    expectEighthTriplet(cr->tuplet(), Fraction(1, 4));
+    EXPECT_TRUE(score->inputState().stickyTuplet());
+
+    // an instrument in another voice (bass drum) ends sticky tuplet input, like a voice change
+    enterDrum(36);
+    expectValid(score);
+    EXPECT_FALSE(score->inputState().stickyTuplet());
+
+    ChordRest* bassDrum = stickyCrAt(score, Fraction(1, 2), 1);
+    ASSERT_TRUE(bassDrum);
+    EXPECT_TRUE(bassDrum->isChord());
+    EXPECT_FALSE(bassDrum->tuplet());
+    EXPECT_EQ(bassDrum->ticks(), Fraction(1, 8));
+
+    delete score;
+}
+
+TEST_F(Engraving_TupletTests, stickyTupletDrumsByDuration)
+{
+    MasterScore* score = stickyTupletScoreFrom(u"tupletDrums.mscx", 0);
+    ASSERT_TRUE(score);
+    InputState& is = score->inputState();
+    is.setNoteEntryMethod(NoteEntryMethod::BY_DURATION);
+
+    // snares (voice 1) continue the sticky triplets
+    startStickyTuplet(score, Fraction(0, 1));
+    is.setNotes({ NoteVal(38) });
+    for (int i = 0; i < 3; ++i) {
+        pressDuration(score, DurationType::V_EIGHTH);
+    }
+    expectValid(score);
+    EXPECT_EQ(rhythm(measureAt(score, 0)), "3:2[8 8 8] r4 r2");
+    EXPECT_TRUE(is.stickyTuplet());
+
+    // a bass drum (voice 2) ends sticky tuplet input, as a voice change does: no empty triplet in voice 1
+    is.setNotes({ NoteVal(36) });
+    pressDuration(score, DurationType::V_EIGHTH);
+    expectValid(score);
+    EXPECT_FALSE(is.stickyTuplet());
+    EXPECT_EQ(rhythm(measureAt(score, 0)), "3:2[8 8 8] r4 r2");
+    ChordRest* bassDrum = stickyCrAt(score, Fraction(1, 4), 1);
+    ASSERT_TRUE(bassDrum);
+    EXPECT_TRUE(bassDrum->isChord());
+    EXPECT_FALSE(bassDrum->tuplet());
+
+    delete score;
+}
+
+TEST_F(Engraving_TupletTests, stickyTupletDrumsNoRoom)
+{
+    MasterScore* score = stickyTupletScoreFrom(u"tupletDrums.mscx", 0);
+    ASSERT_TRUE(score);
+    InputState& is = score->inputState();
+
+    // from a MIDI keyboard: the drum's voice is chosen when the note is added
+    auto enterDrum = [score](int drumPitch) {
+        score->transactionManager()->transaction(TranslatableString::untranslatable("Sticky tuplet tests"), [&](Transaction& tx) {
+            NoteInput::addMidiPitch(tx, score, drumPitch, false, false);
+        });
+    };
+
+    // 5 snare eighths, a sticky triplet up to 7/8, then the next triplet doesn't fit
+    for (int i = 0; i < 5; ++i) {
+        enterDrum(38);
+    }
+    startStickyTuplet(score, Fraction(5, 8));
+    for (int i = 0; i < 3; ++i) {
+        enterDrum(38);
+    }
+    MScore::setError(MsError::MS_NO_ERROR);
+
+    // a snare (voice 1) is refused
+    enterDrum(38);
+    EXPECT_EQ(MScore::_error, MsError::NO_SPACE_FOR_STICKY_TUPLET);
+    MScore::setError(MsError::MS_NO_ERROR);
+    EXPECT_TRUE(is.stickyTuplet());
+
+    // a bass drum (voice 2) isn't: it ends sticky tuplet input, as a voice change does
+    enterDrum(36);
+    expectValid(score);
+    EXPECT_EQ(MScore::_error, MsError::MS_NO_ERROR);
+    EXPECT_FALSE(is.stickyTuplet());
+    EXPECT_EQ(rhythm(measureAt(score, 0)), "8 8 8 8 8 3:2[8 8 8] r8");
+    ChordRest* bassDrum = stickyCrAt(score, Fraction(7, 8), 1);
+    ASSERT_TRUE(bassDrum);
+    EXPECT_TRUE(bassDrum->isChord());
+    EXPECT_FALSE(bassDrum->tuplet());
+
+    delete score;
+}
+
+TEST_F(Engraving_TupletTests, stickyTupletRepeat)
+{
+    MasterScore* score = stickyTupletScore(NoteEntryMethod::BY_NOTE_NAME, false);
+    ASSERT_TRUE(score);
+    InputState& is = score->inputState();
+
+    // 5 eighths, then a sticky triplet up to 7/8 whose first note is a chord
+    for (int i = 0; i < 5; ++i) {
+        enterNote(score);
+    }
+    startStickyTuplet(score, Fraction(5, 8));
+    enterNote(score, 60);
+    enterNote(score, 64, true);
+
+    // R repeats the chord in the sticky triplet
+    for (int i = 0; i < 2; ++i) {
+        repeatChord(score, toChord(stickyCrAt(score, Fraction(5, 8))));
+    }
+    expectValid(score);
+    EXPECT_EQ(rhythm(measureAt(score, 0)), "8 8 8 8 8 3:2[8 8 8] r8");
+    for (const Fraction& tick : { Fraction(5, 8), Fraction(17, 24), Fraction(19, 24) }) {
+        const ChordRest* cr = stickyCrAt(score, tick);
+        ASSERT_TRUE(cr && cr->isChord());
+        EXPECT_EQ(toChord(cr)->notes().size(), 2u);
+    }
+    MScore::setError(MsError::MS_NO_ERROR);
+
+    // where the next triplet doesn't fit, R enters nothing: no note added to the last chord either
+    repeatChord(score, toChord(stickyCrAt(score, Fraction(19, 24))));
+    expectValid(score);
+    EXPECT_EQ(MScore::_error, MsError::NO_SPACE_FOR_STICKY_TUPLET);
+    MScore::setError(MsError::MS_NO_ERROR);
+    EXPECT_EQ(rhythm(measureAt(score, 0)), "8 8 8 8 8 3:2[8 8 8] r8");
+    EXPECT_EQ(toChord(stickyCrAt(score, Fraction(19, 24)))->notes().size(), 2u);
+    EXPECT_TRUE(is.stickyTuplet());
+
+    delete score;
+}
+
+TEST_F(Engraving_TupletTests, stickyTupletLocalTimeSig)
+{
+    MasterScore* score = stickyTupletScore(NoteEntryMethod::BY_NOTE_NAME, false);
+    ASSERT_TRUE(score);
+
+    // a local 2/4 in 4/4: two triplets fill the bar, and a half note spills from one into the next
+    score->transactionManager()->transaction(TranslatableString::untranslatable("Sticky tuplet tests"), [&](Transaction& tx) {
+        TimeSig* ts = Factory::createTimeSig(score->dummy());
+        ts->setSig(Fraction(2, 4));
+        EditTimeSig::addTimeSig(tx, score, score->firstMeasure(), 0, ts, true);
+    });
+    ASSERT_EQ(score->staff(0)->timeStretch(Fraction(0, 1)), Fraction(1, 2));
+
+    startStickyTuplet(score, Fraction(0, 1));
+    enterNote(score, 60);
+    score->inputState().setDuration(DurationType::V_HALF);
+    enterNote(score, 62);
+    expectValid(score);
+    EXPECT_EQ(rhythm(measureAt(score, 0)), "3:2[8 4] 3:2[4 r8]");
+    EXPECT_TRUE(score->inputState().stickyTuplet());
+
+    // the next bar starts with a new triplet
+    score->inputState().setDuration(DurationType::V_EIGHTH);
+    enterNote(score, 64);
+    enterNote(score, 64);
+    expectValid(score);
+    EXPECT_EQ(rhythm(measureAt(score, 0)), "3:2[8 4] 3:2[4 8]");
+    EXPECT_EQ(rhythm(measureAt(score, 1)), "3:2[8 r8 r8] r4");
+
+    delete score;
+}
+
+TEST_F(Engraving_TupletTests, stickyTupletByDuration)
+{
+    for (NoteEntryMethod method : { NoteEntryMethod::BY_DURATION, NoteEntryMethod::RHYTHM }) {
+        MasterScore* score = pendingTupletScore(method);
+        ASSERT_TRUE(score);
+        InputState& is = score->inputState();
+
+        // 13 eighths: four triplets fill the bar, the 13th starts a triplet in the next bar
+        setPendingStickyTriplet(score);
+        for (int i = 0; i < 13; ++i) {
+            pressDuration(score, DurationType::V_EIGHTH);
+        }
+        expectValid(score);
+        EXPECT_EQ(rhythm(measureAt(score, 0)), "3:2[8 8 8] 3:2[8 8 8] 3:2[8 8 8] 3:2[8 8 8]");
+        EXPECT_EQ(rhythm(measureAt(score, 1)), "3:2[8 r8 r8] r4 r2");
+
+        // a rest starts the next triplet too
+        pressDuration(score, DurationType::V_EIGHTH);
+        pressDuration(score, DurationType::V_EIGHTH);
+        is.setRest(true);
+        pressDuration(score, DurationType::V_EIGHTH);
+        is.setRest(false);
+        pressDuration(score, DurationType::V_EIGHTH);
+        expectValid(score);
+        EXPECT_EQ(rhythm(measureAt(score, 1)), "3:2[8 8 8] 3:2[r8 8 r8] r2");
+        EXPECT_TRUE(is.stickyTuplet());
+
+        // undoing the rest takes its triplet away, and sticky tuplet input stays on
+        score->undoRedo(true, nullptr);
+        score->undoRedo(true, nullptr);
+        expectValid(score);
+        EXPECT_EQ(rhythm(measureAt(score, 1)), "3:2[8 8 8] r4 r2");
+        EXPECT_TRUE(is.stickyTuplet());
+
+        delete score;
+    }
+}
+
+TEST_F(Engraving_TupletTests, stickyTupletSpillOverByDuration)
+{
+    for (NoteEntryMethod method : { NoteEntryMethod::BY_DURATION, NoteEntryMethod::RHYTHM }) {
+        MasterScore* score = pendingTupletScore(method);
+        ASSERT_TRUE(score);
+        InputState& is = score->inputState();
+
+        // an eighth, then a half note: a quarter at the end of this triplet, tied to a quarter in the next one
+        setPendingStickyTriplet(score);
+        pressDuration(score, DurationType::V_EIGHTH);
+        pressDuration(score, DurationType::V_HALF);
+        expectValid(score);
+        EXPECT_EQ(rhythm(measureAt(score, 0)), "3:2[8 4] 3:2[4 r8] r2");
+        const Chord* tiedFrom = toChord(stickyCrAt(score, Fraction(1, 12)));
+        const ChordRest* tiedTo = stickyCrAt(score, Fraction(1, 4));
+        ASSERT_TRUE(tiedFrom && tiedTo && tiedTo->isChord());
+        ASSERT_TRUE(tiedFrom->upNote()->tieFor());
+        EXPECT_EQ(tiedFrom->upNote()->tieFor()->endNote(), toChord(tiedTo)->upNote());
+        EXPECT_EQ(is.tick(), Fraction(5, 12));
+        EXPECT_TRUE(is.stickyTuplet());
+
+        delete score;
+    }
+}
+
+TEST_F(Engraving_TupletTests, stickyTupletNoRoomSpillOverByDuration)
+{
+    for (NoteEntryMethod method : { NoteEntryMethod::BY_DURATION, NoteEntryMethod::RHYTHM }) {
+        MasterScore* score = pendingTupletScore(method);
+        ASSERT_TRUE(score);
+        InputState& is = score->inputState();
+
+        // 5 ordinary eighths, then a sticky triplet up to 7/8
+        for (int i = 0; i < 5; ++i) {
+            pressDuration(score, DurationType::V_EIGHTH);
+        }
+        setPendingStickyTriplet(score);
+        pressDuration(score, DurationType::V_EIGHTH);
+        ASSERT_EQ(rhythm(measureAt(score, 0)), "8 8 8 8 8 3:2[8 r8 r8] r8");
+        MScore::setError(MsError::MS_NO_ERROR);
+
+        // a half note would continue in a triplet that doesn't fit: nothing is entered
+        pressDuration(score, DurationType::V_HALF);
+        expectValid(score);
+        EXPECT_EQ(MScore::_error, MsError::NO_SPACE_FOR_STICKY_TUPLET);
+        MScore::setError(MsError::MS_NO_ERROR);
+        EXPECT_EQ(rhythm(measureAt(score, 0)), "8 8 8 8 8 3:2[8 r8 r8] r8");
+        EXPECT_EQ(is.duration().type(), DurationType::V_EIGHTH);
+
+        // a quarter fills the triplet
+        pressDuration(score, DurationType::V_QUARTER);
+        expectValid(score);
+        EXPECT_EQ(MScore::_error, MsError::MS_NO_ERROR);
+        EXPECT_EQ(rhythm(measureAt(score, 0)), "8 8 8 8 8 3:2[8 4] r8");
+        EXPECT_TRUE(is.stickyTuplet());
+
+        delete score;
+    }
+}
+
+TEST_F(Engraving_TupletTests, stickyTupletOtherVoiceSelected)
+{
+    // an eighth triplet on beat 2, then quarters in voice 2, as before a switch back to voice 1: sticky tuplet
+    // input continues the triplet in voice 1, though the selection is in voice 2
+    for (NoteEntryMethod method : { NoteEntryMethod::BY_NOTE_NAME, NoteEntryMethod::BY_DURATION, NoteEntryMethod::RHYTHM }) {
+        MasterScore* score = pendingTupletScore();
+        ASSERT_TRUE(score);
+        InputState& is = score->inputState();
+
+        is.setRest(true);
+        pressDuration(score, DurationType::V_QUARTER);
+        is.setRest(false);
+        setPendingTriplet(score, true);
+        for (int i = 0; i < 3; ++i) {
+            pressDuration(score, DurationType::V_EIGHTH);
+        }
+        enterVoice2Quarters(score);
+        ASSERT_EQ(rhythm(measureAt(score, 0)), "r4 3:2[8 8 8] r2");
+        is.setNoteEntryMethod(method);
+        is.setSegment(score->tick2segment(Fraction(1, 2), false, SegmentType::ChordRest));
+        is.setDuration(DurationType::V_EIGHTH);
+        is.setStickyTuplet(StickyTuplet::of(stickyCrAt(score, Fraction(1, 4))->tuplet()));
+        ASSERT_TRUE(score->selection().element());
+        ASSERT_EQ(score->selection().element()->track(), 1);
+
+        // the next triplet replaces part of the half rest
+        enterDuration(score, DurationType::V_EIGHTH);
+        expectValid(score);
+        EXPECT_EQ(rhythm(measureAt(score, 0)), "r4 3:2[8 8 8] 3:2[8 r8 r8] r4");
+        EXPECT_EQ(is.track(), 0);
+        EXPECT_EQ(is.tick(), Fraction(1, 2) + Fraction(1, 12));
+        EXPECT_TRUE(is.stickyTuplet());
+
+        delete score;
+    }
+}
+
+TEST_F(Engraving_TupletTests, stickyTupletOtherRatio)
+{
+    MasterScore* score = stickyTupletScore(NoteEntryMethod::BY_NOTE_NAME, false);
+    ASSERT_TRUE(score);
+    InputState& is = score->inputState();
+
+    // an eighth triplet (3:2) on beat 1, and sticky eighth sextuplets (6:4): the triplet isn't one of them
+    ASSERT_TRUE(addTuplet(stickyCrAt(score, Fraction(0, 1)), Fraction(3, 2), TDuration(DurationType::V_EIGHTH)));
+    StickyTuplet sextuplet;
+    sextuplet.levels.push_back({ Fraction(6, 4), TDuration(DurationType::V_EIGHTH), TupletNumberType::SHOW_NUMBER,
+                                 TupletBracketType::AUTO_BRACKET });
+    is.setStickyTuplet(sextuplet);
+    for (const Fraction& tick : { Fraction(0, 1), Fraction(1, 12), Fraction(1, 4) }) {
+        is.setSegment(score->tick2segment(tick, false, SegmentType::ChordRest));
+        EXPECT_FALSE(is.stickyTupletContinues());
+    }
+
+    delete score;
+}
+
+TEST_F(Engraving_TupletTests, stickyTupletInPart)
+{
+    MasterScore* score = stickyTupletScore(NoteEntryMethod::BY_NOTE_NAME, false);
+    ASSERT_TRUE(score);
+
+    score->startCmd(TranslatableString::untranslatable("Sticky tuplet tests"));
+    Score* part = score->createScore();
+    // the score owns and deletes the excerpt
+    Excerpt* ex = new Excerpt(score);
+    ex->setExcerptScore(part);
+    ex->setName(u"Piano");
+    ex->setParts({ score->parts().at(0) });
+    Excerpt::createExcerpt(ex);
+    score->undo(new AddExcerpt(ex));
+    score->endCmd();
+
+    // note input in the part: the sticky triplets are also created in the score
+    InputState& is = part->inputState();
+    is.setTrack(0);
+    is.setSegment(part->tick2segment(Fraction(0, 1), false, SegmentType::ChordRest));
+    is.setDuration(DurationType::V_EIGHTH);
+    is.setNoteEntryMode(true);
+    is.setNoteEntryMethod(NoteEntryMethod::BY_NOTE_NAME);
+    startStickyTuplet(part, Fraction(0, 1));
+    for (int i = 0; i < 7; ++i) {
+        enterNote(part, 60 + i);
+    }
+    expectValid(score);
+    for (Score* s : { static_cast<Score*>(score), part }) {
+        EXPECT_EQ(rhythm(s->firstMeasure()), "3:2[8 8 8] 3:2[8 8 8] 3:2[8 r8 r8] r4");
+    }
+
+    // undo removes the new triplet from both
+    score->undoRedo(true, nullptr);
+    expectValid(score);
+    for (Score* s : { static_cast<Score*>(score), part }) {
+        EXPECT_EQ(rhythm(s->firstMeasure()), "3:2[8 8 8] 3:2[8 8 8] r2");
+    }
+
+    delete score;
+}
+
+//-----------------------------------------
+//    sticky tuplets with dotted durations
+//     single and double dots in sticky eighth note
+//     triplets, in each input method
+//-----------------------------------------
+
+TEST_F(Engraving_TupletTests, stickyTupletDotted)
+{
+    for (NoteEntryMethod method : { NoteEntryMethod::BY_NOTE_NAME, NoteEntryMethod::BY_DURATION, NoteEntryMethod::RHYTHM }) {
+        MasterScore* score = pendingTupletScore(method);
+        ASSERT_TRUE(score);
+        InputState& is = score->inputState();
+
+        // two dotted eighths fill each triplet
+        startStickyTuplet(score, Fraction(0, 1));
+        for (int i = 0; i < 4; ++i) {
+            enterDuration(score, DurationType::V_EIGHTH, 1);
+        }
+        expectValid(score);
+        EXPECT_EQ(rhythm(measureAt(score, 0)), "3:2[8. 8.] 3:2[8. 8.] r2");
+        EXPECT_EQ(is.tick(), Fraction(1, 2));
+        EXPECT_TRUE(is.stickyTuplet());
+
+        delete score;
+    }
+}
+
+TEST_F(Engraving_TupletTests, stickyTupletDottedSpillOver)
+{
+    for (NoteEntryMethod method : { NoteEntryMethod::BY_NOTE_NAME, NoteEntryMethod::BY_DURATION, NoteEntryMethod::RHYTHM }) {
+        MasterScore* score = pendingTupletScore(method);
+        ASSERT_TRUE(score);
+        InputState& is = score->inputState();
+
+        // an eighth, then a dotted quarter: a quarter at the end of this triplet, tied to an eighth in the next one
+        startStickyTuplet(score, Fraction(0, 1));
+        enterDuration(score, DurationType::V_EIGHTH);
+        enterDuration(score, DurationType::V_QUARTER, 1);
+        expectValid(score);
+        EXPECT_EQ(rhythm(measureAt(score, 0)), "3:2[8 4] 3:2[8 r8 r8] r2");
+        const Chord* tiedFrom = toChord(stickyCrAt(score, Fraction(1, 12)));
+        const ChordRest* tiedTo = stickyCrAt(score, Fraction(1, 4));
+        ASSERT_TRUE(tiedFrom && tiedTo && tiedTo->isChord());
+        ASSERT_TRUE(tiedFrom->upNote()->tieFor());
+        EXPECT_EQ(tiedFrom->upNote()->tieFor()->endNote(), toChord(tiedTo)->upNote());
+        EXPECT_EQ(is.tick(), Fraction(1, 3));
+        EXPECT_TRUE(is.stickyTuplet());
+
+        delete score;
+    }
+}
+
+TEST_F(Engraving_TupletTests, stickyTupletDoubleDotted)
+{
+    for (NoteEntryMethod method : { NoteEntryMethod::BY_NOTE_NAME, NoteEntryMethod::BY_DURATION, NoteEntryMethod::RHYTHM }) {
+        MasterScore* score = pendingTupletScore(method);
+        ASSERT_TRUE(score);
+        InputState& is = score->inputState();
+
+        // two double-dotted eighths: the second is an eighth tied to a 32nd at the end of this triplet,
+        // tied to a sixteenth in the next one
+        startStickyTuplet(score, Fraction(0, 1));
+        enterDuration(score, DurationType::V_EIGHTH, 2);
+        enterDuration(score, DurationType::V_EIGHTH, 2);
+        expectValid(score);
+        EXPECT_EQ(rhythm(measureAt(score, 0)), "3:2[8.. 8 32] 3:2[16 r16 r8 r8] r2");
+        EXPECT_EQ(is.tick(), Fraction(7, 24));
+        const ChordRest* last = stickyCrAt(score, Fraction(1, 4));
+        ASSERT_TRUE(last && last->isChord());
+        EXPECT_TRUE(toChord(last)->upNote()->tieBack());
+        expectEighthTriplet(last->tuplet(), Fraction(1, 4));
+        EXPECT_TRUE(is.stickyTuplet());
+
+        delete score;
+    }
+}
+
+TEST_F(Engraving_TupletTests, stickyTupletDottedRest)
+{
+    for (NoteEntryMethod method : { NoteEntryMethod::BY_NOTE_NAME, NoteEntryMethod::BY_DURATION, NoteEntryMethod::RHYTHM }) {
+        for (int dots : { 1, 2 }) {
+            MasterScore* score = pendingTupletScore(method);
+            ASSERT_TRUE(score);
+            InputState& is = score->inputState();
+
+            // a dotted rest, a dotted note, and a dotted rest that starts the next triplet
+            startStickyTuplet(score, Fraction(0, 1));
+            enterDuration(score, DurationType::V_EIGHTH, dots, true);
+            enterDuration(score, DurationType::V_EIGHTH, dots);
+            enterDuration(score, DurationType::V_EIGHTH, dots, true);
+            expectValid(score);
+            EXPECT_EQ(rhythm(measureAt(score, 0)),
+                      dots == 1 ? "3:2[r8. 8.] 3:2[r8. r16 r8] r2" : "3:2[r8.. 8 32] 3:2[16 r8.. r32 r16] r2");
+            EXPECT_TRUE(is.stickyTuplet());
+
+            delete score;
+        }
+    }
+}
+
+TEST_F(Engraving_TupletTests, stickyTupletDottedNoteValue)
+{
+    // the dots chosen before the triplet command: dotted or double-dotted eighth triplets
+    for (NoteEntryMethod method : { NoteEntryMethod::BY_DURATION, NoteEntryMethod::RHYTHM }) {
+        for (int dots : { 1, 2 }) {
+            MasterScore* score = pendingTupletScore(method);
+            ASSERT_TRUE(score);
+            InputState& is = score->inputState();
+
+            is.setDots(dots);
+            setPendingStickyTriplet(score);
+            for (int i = 0; i < 4; ++i) {
+                pressDuration(score, DurationType::V_EIGHTH);
+            }
+            expectValid(score);
+            EXPECT_EQ(rhythm(measureAt(score, 0)),
+                      dots == 1 ? "3:2[8. 8. 8.] 3:2[8. r8. r8.] r4" : "3:2[8.. 8.. 8..] 3:2[8.. r8.. r8..] r8");
+            const Fraction second = dots == 1 ? Fraction(3, 8) : Fraction(7, 16);
+            const ChordRest* cr = stickyCrAt(score, second);
+            ASSERT_TRUE(cr && cr->tuplet());
+            EXPECT_EQ(cr->tuplet()->tick(), second);
+            EXPECT_EQ(cr->tuplet()->baseLen().type(), DurationType::V_EIGHTH);
+            EXPECT_EQ(cr->tuplet()->baseLen().dots(), dots);
+            EXPECT_TRUE(is.stickyTuplet());
+
+            delete score;
+        }
+    }
+}
+
+TEST_F(Engraving_TupletTests, stickyTupletDottedNoRoom)
+{
+    for (NoteEntryMethod method : { NoteEntryMethod::BY_NOTE_NAME, NoteEntryMethod::BY_DURATION, NoteEntryMethod::RHYTHM }) {
+        MasterScore* score = pendingTupletScore(method);
+        ASSERT_TRUE(score);
+        InputState& is = score->inputState();
+
+        // 5 ordinary eighths, then a dotted quarter fills a sticky triplet up to 7/8
+        for (int i = 0; i < 5; ++i) {
+            enterDuration(score, DurationType::V_EIGHTH);
+        }
+        startStickyTuplet(score, Fraction(5, 8));
+        enterDuration(score, DurationType::V_QUARTER, 1);
+        expectValid(score);
+        EXPECT_EQ(rhythm(measureAt(score, 0)), "8 8 8 8 8 3:2[4.] r8");
+        MScore::setError(MsError::MS_NO_ERROR);
+
+        // the next triplet doesn't fit: no dotted or double-dotted note or rest is entered
+        for (int dots : { 1, 2 }) {
+            for (bool rest : { false, true }) {
+                enterDuration(score, DurationType::V_16TH, dots, rest);
+                EXPECT_EQ(MScore::_error, MsError::NO_SPACE_FOR_STICKY_TUPLET);
+                MScore::setError(MsError::MS_NO_ERROR);
+            }
+        }
+        expectValid(score);
+        EXPECT_EQ(rhythm(measureAt(score, 0)), "8 8 8 8 8 3:2[4.] r8");
+        EXPECT_TRUE(is.stickyTuplet());
+
+        // after ending sticky tuplet input, a dotted sixteenth
+        is.setStickyTuplet(std::nullopt);
+        enterDuration(score, DurationType::V_16TH, 1);
+        expectValid(score);
+        EXPECT_EQ(MScore::_error, MsError::MS_NO_ERROR);
+        EXPECT_EQ(rhythm(measureAt(score, 0)), "8 8 8 8 8 3:2[4.] 16. r32");
+
+        delete score;
+    }
+}
+
+TEST_F(Engraving_TupletTests, stickyTupletDotPreviousNote)
+{
+    for (NoteEntryMethod method : { NoteEntryMethod::BY_DURATION, NoteEntryMethod::RHYTHM }) {
+        MasterScore* score = pendingTupletScore(method);
+        ASSERT_TRUE(score);
+        InputState& is = score->inputState();
+
+        // two eighths, then the second one dotted: the input position moves on, and sticky input continues
+        setPendingStickyTriplet(score);
+        pressDuration(score, DurationType::V_EIGHTH);
+        pressDuration(score, DurationType::V_EIGHTH);
+        score->transactionManager()->transaction(TranslatableString::untranslatable("Sticky tuplet tests"), [&](Transaction& tx) {
+            NoteInput::toggleDots(tx, score, 1, true /*toggleForSelectionOnly*/);
+        });
+        expectValid(score);
+        EXPECT_EQ(rhythm(measureAt(score, 0)), "3:2[8 8. r16] r4 r2");
+        EXPECT_EQ(is.tick(), Fraction(5, 24));
+        EXPECT_TRUE(is.stickyTuplet());
+
+        // a sixteenth fills the triplet, and the next eighth starts the next one
+        pressDuration(score, DurationType::V_16TH);
+        pressDuration(score, DurationType::V_EIGHTH);
+        expectValid(score);
+        EXPECT_EQ(rhythm(measureAt(score, 0)), "3:2[8 8. 16] 3:2[8 r8 r8] r2");
 
         delete score;
     }

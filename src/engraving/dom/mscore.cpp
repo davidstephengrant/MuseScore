@@ -127,6 +127,7 @@ std::string MScore::errorToString(MsError err)
     case MsError::NOTE_VALUE_TUPLET_ON_SEVERAL_CHORD_RESTS: return "NOTE_VALUE_TUPLET_ON_SEVERAL_CHORD_RESTS";
     case MsError::TUPLET_NOTE_VALUE_TOO_SHORT: return "TUPLET_NOTE_VALUE_TOO_SHORT";
     case MsError::CANNOT_INSERT_TUPLET_IN_TUPLET: return "CANNOT_INSERT_TUPLET_IN_TUPLET";
+    case MsError::NO_SPACE_FOR_STICKY_TUPLET: return "NO_SPACE_FOR_STICKY_TUPLET";
     }
 
     return {};

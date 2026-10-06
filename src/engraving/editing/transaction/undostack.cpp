@@ -379,6 +379,23 @@ void UndoableTransaction::applySelectionInfo(const SelectionInfo& info, Selectio
     }
 }
 
+// undo and redo can end sticky tuplet input but never start it, e.g. after Escape stopped it
+static void restoreInputState(Score* score, const InputState& state)
+{
+    const bool stickyTupletOn = bool(score->inputState().stickyTuplet());
+    score->inputState().restoreFromUndo(state);
+    if (!stickyTupletOn) {
+        score->inputState().setStickyTuplet(std::nullopt);
+
+        // nor through a waiting tuplet that would start it
+        std::optional<PendingTuplet> pending = score->inputState().pendingTuplet();
+        if (pending && pending->sticky) {
+            pending->sticky = false;
+            score->inputState().setPendingTuplet(pending);
+        }
+    }
+}
+
 void UndoableTransaction::undo()
 {
     m_redoInputState = m_score->inputState();
@@ -390,7 +407,7 @@ void UndoableTransaction::undo()
         (*it)->undo();
     }
 
-    m_score->inputState().restoreFromUndo(m_undoInputState);
+    restoreInputState(m_score, m_undoInputState);
     if (m_undoSelectionInfo.isValid()) {
         m_score->deselectAll();
         applySelectionInfo(m_undoSelectionInfo, m_score->selection());
@@ -408,7 +425,7 @@ void UndoableTransaction::redo()
         command->redo();
     }
 
-    m_score->inputState().restoreFromUndo(m_redoInputState);
+    restoreInputState(m_score, m_redoInputState);
     if (m_redoSelectionInfo.isValid()) {
         m_score->deselectAll();
         applySelectionInfo(m_redoSelectionInfo, m_score->selection());

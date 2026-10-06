@@ -87,7 +87,12 @@ public:
     static bool insertSplitsTuplet(const Segment* segment);
 
     static void truncateChordRest(Transaction& tx, Score* score, ChordRest* cr, const Fraction& tick, bool fillWithRest);
+    static void addStickyTuplets(Transaction& tx, Score* score, InputState& is, const Fraction& duration);
+    static bool stickyTupletInsertsHere(const InputState& is);
+    static bool insertStickyTuplets(Transaction& tx, Score* score, InputState& is);
     static Fraction insertedTupletDuration(const InputState& is, const Fraction& duration);
+    static bool stickyTupletsFit(const Score* score, const InputState& is, const Fraction& duration);
+    static bool nextStickyTupletFits(const Score* score, const InputState& is);
 
     static void nextInputPos(Transaction& tx, Score* score, const ChordRest* cr, bool doSelect);
 
