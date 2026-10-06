@@ -165,6 +165,12 @@ public:
     virtual void setTupletsWaitForNextDuration(bool wait) = 0;
     virtual muse::async::Notification tupletsWaitForNextDurationChanged() const = 0;
 
+    // sticky tuplets: a tuplet added during note input starts sticky tuplet input;
+    // kept for the session only, so it's off at each launch
+    virtual bool stickyTupletInput() const = 0;
+    virtual void setStickyTupletInput(bool sticky) = 0;
+    virtual muse::async::Notification stickyTupletInputChanged() const = 0;
+
     virtual muse::io::path_t userMusicFontsPath() const = 0;
     virtual void setUserMusicFontsPath(const muse::io::path_t& path) = 0;
     virtual muse::async::Channel<muse::io::path_t> userMusicFontsPathChanged() const = 0;

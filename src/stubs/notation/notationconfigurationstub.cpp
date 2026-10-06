@@ -432,6 +432,21 @@ muse::async::Notification NotationConfigurationStub::tupletsWaitForNextDurationC
     return n;
 }
 
+bool NotationConfigurationStub::stickyTupletInput() const
+{
+    return false;
+}
+
+void NotationConfigurationStub::setStickyTupletInput(bool)
+{
+}
+
+muse::async::Notification NotationConfigurationStub::stickyTupletInputChanged() const
+{
+    static muse::async::Notification n;
+    return n;
+}
+
 muse::io::path_t NotationConfigurationStub::userMusicFontsPath() const
 {
     return muse::io::path_t();

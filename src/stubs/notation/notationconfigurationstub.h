@@ -151,6 +151,10 @@ public:
     void setTupletsWaitForNextDuration(bool wait) override;
     muse::async::Notification tupletsWaitForNextDurationChanged() const override;
 
+    bool stickyTupletInput() const override;
+    void setStickyTupletInput(bool sticky) override;
+    muse::async::Notification stickyTupletInputChanged() const override;
+
     muse::io::path_t userMusicFontsPath() const override;
     void setUserMusicFontsPath(const muse::io::path_t& path) override;
     muse::async::Channel<muse::io::path_t> userMusicFontsPathChanged() const override;

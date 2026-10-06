@@ -886,6 +886,26 @@ muse::async::Notification NotationConfiguration::tupletsWaitForNextDurationChang
     return m_tupletsWaitForNextDurationChanged;
 }
 
+bool NotationConfiguration::stickyTupletInput() const
+{
+    return m_stickyTupletInput;
+}
+
+void NotationConfiguration::setStickyTupletInput(bool sticky)
+{
+    if (m_stickyTupletInput == sticky) {
+        return;
+    }
+
+    m_stickyTupletInput = sticky;
+    m_stickyTupletInputChanged.notify();
+}
+
+muse::async::Notification NotationConfiguration::stickyTupletInputChanged() const
+{
+    return m_stickyTupletInputChanged;
+}
+
 bool NotationConfiguration::isMidiInputEnabled() const
 {
     return settings()->value(IS_MIDI_INPUT_ENABLED).toBool();
