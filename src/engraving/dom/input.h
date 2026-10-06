@@ -199,10 +199,13 @@ public:
     void setContinuingTuplet(const std::optional<ContinuingTuplet>& t);
     void resumeContinuingTuplet(const ContinuingTuplet& t);
     void stopContinuingTuplet();
+    void stepOutOfContinuingTuplet();
+    void setContinuingTupletDuration();
     bool startContinuingTupletInside();
     bool continueTupletsAllowed() const;
     const Tuplet* tupletToContinue() const;
     bool continuingTupletGoesOn() const;
+    bool inSteppedOutTuplet() const;
 
     void update(Selection& selection);
     void moveInputPos(EngravingItem* e);
@@ -259,6 +262,8 @@ private:
     std::optional<ResumedAt> m_continuingTupletResumedAt;
     // where continuing tuplet input was stopped inside a tuplet: where the outermost one starts
     std::optional<std::pair<Fraction, track_idx_t> > m_continuingTupletStoppedIn;
+    // where continuing tuplet input stepped out of a nested level: where the outermost tuplet starts
+    std::optional<std::pair<Fraction, track_idx_t> > m_continuingTupletSteppedOutIn;
 
     // kept through undo and redo: the last number given to a waiting tuplet, and the last one cancelled
     int m_pendingTupletNumber = 0;

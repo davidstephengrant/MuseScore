@@ -2061,7 +2061,8 @@ bool NoteInput::setPendingTuplet(Score* score, PendingTuplet pending)
 //---------------------------------------------------------
 //   cancelPendingTuplet
 //    Cancel the innermost waiting tuplet. The duration becomes
-//    the note value of the tuplet it was waiting in.
+//    the note value of the tuplet it was waiting in or, for
+//    the last one, of continuing tuplet input going on here.
 //---------------------------------------------------------
 
 void NoteInput::cancelPendingTuplet(Score* score)
@@ -2074,6 +2075,9 @@ void NoteInput::cancelPendingTuplet(Score* score)
     PendingTuplet pending = *is.pendingTuplet();
     if (pending.nested.empty()) {
         is.setPendingTuplet(std::nullopt);
+        if (is.continueTupletsAllowed() && is.continuingTupletGoesOn()) {
+            is.setContinuingTupletDuration();
+        }
         return;
     }
 

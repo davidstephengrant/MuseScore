@@ -363,7 +363,8 @@ const Tuplet* InputState::tupletToContinue() const
 //   continuingTupletGoesOn
 //    Whether continuing tuplet input goes on at the input
 //    position: in tuplets of its kind, straight after
-//    them, or where it was resumed. Moving elsewhere ends it.
+//    them, where it was resumed, or anywhere in the tuplet it
+//    stepped out of a level in. Moving elsewhere ends it.
 //---------------------------------------------------------
 
 bool InputState::continuingTupletGoesOn() const
@@ -375,7 +376,25 @@ bool InputState::continuingTupletGoesOn() const
         && m_continuingTupletResumedAt->beyondScore == m_beyondScore) {
         return true;
     }
-    return m_continuingTuplet->startsWith(tupletToContinue());
+    return inSteppedOutTuplet() || m_continuingTuplet->startsWith(tupletToContinue());
+}
+
+//---------------------------------------------------------
+//   inSteppedOutTuplet
+//    Whether the input position is still in the tuplet where
+//    continuing tuplet input stepped out of a nested level
+//---------------------------------------------------------
+
+bool InputState::inSteppedOutTuplet() const
+{
+    if (!m_continuingTupletSteppedOutIn) {
+        return false;
+    }
+    const Tuplet* tuplet = tupletToContinue();
+    while (tuplet && tuplet->tuplet()) {
+        tuplet = tuplet->tuplet();
+    }
+    return tuplet && *m_continuingTupletSteppedOutIn == std::make_pair(tuplet->tick(), tuplet->track());
 }
 
 //---------------------------------------------------------
@@ -394,6 +413,7 @@ void InputState::setContinuingTuplet(const std::optional<ContinuingTuplet>& t)
 {
     m_continuingTuplet = t;
     m_continuingTupletResumedAt.reset();
+    m_continuingTupletSteppedOutIn.reset();
     if (t) {
         m_continuingTupletStoppedIn.reset();
     }
@@ -422,6 +442,57 @@ void InputState::stopContinuingTuplet()
 }
 
 //---------------------------------------------------------
+//   stepOutOfContinuingTuplet
+//    Stop the innermost level of continuing tuplet input, and with
+//    only one level, continuing tuplet input. Nesting stays off
+//    until the input position leaves the outermost tuplet.
+//---------------------------------------------------------
+
+void InputState::stepOutOfContinuingTuplet()
+{
+    if (!m_continuingTuplet) {
+        return;
+    }
+    if (m_continuingTuplet->levels.size() <= 1) {
+        stopContinuingTuplet();
+        return;
+    }
+
+    m_continuingTuplet->levels.pop_back();
+
+    const Tuplet* tuplet = tupletToContinue();
+    while (tuplet && tuplet->tuplet()) {
+        tuplet = tuplet->tuplet();
+    }
+    m_continuingTupletSteppedOutIn = tuplet ? std::make_optional(std::make_pair(tuplet->tick(), tuplet->track())) : std::nullopt;
+
+    setContinuingTupletDuration();
+}
+
+//---------------------------------------------------------
+//   setContinuingTupletDuration
+//    The duration becomes the note value of continuing tuplet
+//    input, unless the input position is inside a tuplet
+//    stepped out of: then the next notes fill that tuplet.
+//---------------------------------------------------------
+
+void InputState::setContinuingTupletDuration()
+{
+    if (!m_continuingTuplet) {
+        return;
+    }
+
+    size_t depth = 0;
+    const ChordRest* current = m_beyondScore ? nullptr : cr();
+    for (const Tuplet* t = current ? current->tuplet() : nullptr; t; t = t->tuplet()) {
+        ++depth;
+    }
+    if (depth <= m_continuingTuplet->levels.size()) {
+        setDuration(m_continuingTuplet->levels.back().baseLen);
+    }
+}
+
+//---------------------------------------------------------
 //   startContinuingTupletInside
 //    Start continuing tuplet input with the tuplet the input
 //    position is in, with the tuplets it is nested in, unless
@@ -432,6 +503,9 @@ bool InputState::startContinuingTupletInside()
 {
     const ChordRest* current = m_beyondScore ? nullptr : cr();
     const Tuplet* outermost = outermostTuplet(current);
+    if (!inSteppedOutTuplet()) {
+        m_continuingTupletSteppedOutIn.reset();
+    }
     if (m_continuingTupletStoppedIn
         && (!outermost || *m_continuingTupletStoppedIn != std::make_pair(outermost->tick(), outermost->track()))) {
         m_continuingTupletStoppedIn.reset();

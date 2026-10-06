@@ -826,9 +826,13 @@ void NotationActionController::resetState()
     if (noteInput->isNoteInputMode()) {
         noteInput->forgetPendingTuplets();
 
-        // Escape cancels one level of a pending tuplet, else ends note input
+        // Escape cancels one level of a pending tuplet, else stops a level of continuing tuplet input, else ends note input
         if (noteInput->tupletPending()) {
             noteInput->cancelPendingTuplet();
+            return;
+        }
+        if (noteInput->continueTupletsOn()) {
+            noteInput->stepOutOfContinuingTuplet();
             return;
         }
 

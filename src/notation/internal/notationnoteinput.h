@@ -77,6 +77,7 @@ public:
     muse::String pendingTupletInfo() const override;
 
     bool continueTupletsOn() const override;
+    void stepOutOfContinuingTuplet() override;
     void setContinueTuplets(bool on) override;
 
     void addSlur(mu::engraving::Slur* slur) override;

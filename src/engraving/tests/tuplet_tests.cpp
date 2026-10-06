@@ -5024,6 +5024,58 @@ TEST_F(Engraving_TupletTests, continuingTupletBoundaryReplaces)
     delete score;
 }
 
+TEST_F(Engraving_TupletTests, continuingTupletCancelPendingRestoresDuration)
+{
+    // the same with plain, dotted and double-dotted quarter triplets
+    for (int dots : { 0, 1, 2 }) {
+        MasterScore* score = pendingTupletScore(NoteEntryMethod::BY_NOTE_NAME);
+        ASSERT_TRUE(score);
+        InputState& is = score->inputState();
+        TDuration quarter(DurationType::V_QUARTER);
+        quarter.setDots(dots);
+        is.setDuration(quarter);
+
+        ASSERT_TRUE(setPendingContinuingTupletNoteName(score, Fraction(3, 2)));
+        for (int i = 0; i < 3; ++i) {
+            enterNote(score);
+        }
+        ASSERT_TRUE(is.continuingTuplet());
+
+        // a shorter tuplet waits at the boundary; cancelling it returns to the run's note value
+        is.setDuration(DurationType::V_EIGHTH);
+        ASSERT_TRUE(setPendingContinuingTupletNoteName(score, Fraction(3, 2)));
+        EXPECT_EQ(is.duration().type(), DurationType::V_EIGHTH);
+        NoteInput::cancelPendingTuplet(score);
+        EXPECT_FALSE(is.pendingTuplet());
+        ASSERT_TRUE(is.continuingTuplet());
+        EXPECT_EQ(is.duration(), quarter);
+
+        // and so does cancelling a longer one
+        is.setDuration(DurationType::V_HALF);
+        ASSERT_TRUE(setPendingContinuingTupletNoteName(score, Fraction(3, 2)));
+        NoteInput::cancelPendingTuplet(score);
+        EXPECT_EQ(is.duration(), quarter);
+
+        delete score;
+    }
+}
+
+TEST_F(Engraving_TupletTests, continuingTupletCancelPendingWithoutRunKeepsDuration)
+{
+    MasterScore* score = pendingTupletScore(NoteEntryMethod::BY_NOTE_NAME);
+    ASSERT_TRUE(score);
+    InputState& is = score->inputState();
+
+    is.setDuration(DurationType::V_EIGHTH);
+    ASSERT_TRUE(setPendingContinuingTupletNoteName(score, Fraction(3, 2)));
+    NoteInput::cancelPendingTuplet(score);
+    EXPECT_FALSE(is.pendingTuplet());
+    EXPECT_FALSE(is.continuingTuplet());
+    EXPECT_EQ(is.duration().type(), DurationType::V_EIGHTH);
+
+    delete score;
+}
+
 TEST_F(Engraving_TupletTests, continuingTupletBoundaryNoRoom)
 {
     MasterScore* score = pendingTupletScore(NoteEntryMethod::BY_NOTE_NAME);
@@ -5676,6 +5728,317 @@ TEST_F(Engraving_TupletTests, continuingTupletStoppedInside)
     EXPECT_TRUE(is.startContinuingTupletInside());
 
     delete score;
+}
+
+// continuing eighth triplets in a quarter triplet at the start of the measure
+static MasterScore* continuingTupletNestedScore()
+{
+    MasterScore* score = continuingTupletScore(NoteEntryMethod::BY_NOTE_NAME, false);
+    if (!score) {
+        return nullptr;
+    }
+    addTuplet(continuingCrAt(score, Fraction(0, 1)), Fraction(3, 2), TDuration(DurationType::V_QUARTER));
+    startContinuingTuplet(score, Fraction(0, 1));
+    return score;
+}
+
+// what moving the input position does to continuing tuplet input
+static void moveContinuingInput(Score* score, const Fraction& tick)
+{
+    InputState& is = score->inputState();
+    is.setSegment(score->tick2segment(tick, false, SegmentType::ChordRest));
+    if (!is.continuingTupletGoesOn()) {
+        is.setContinuingTuplet(std::nullopt);
+    }
+    is.startContinuingTupletInside();
+}
+
+TEST_F(Engraving_TupletTests, continuingTupletCancelPendingLeavesPartlyFilledDuration)
+{
+    MasterScore* score = continuingTupletNestedScore();
+    ASSERT_TRUE(score);
+    InputState& is = score->inputState();
+
+    // stepped out of an inner triplet that isn't full yet: cancelling leaves the duration, to fill it
+    enterNote(score);
+    enterNote(score);
+    is.stepOutOfContinuingTuplet();
+    ASSERT_EQ(is.continuingTuplet()->levels.size(), 1u);
+    EXPECT_EQ(is.duration().type(), DurationType::V_EIGHTH);
+    ASSERT_TRUE(setPendingContinuingTupletNoteName(score, Fraction(3, 2)));
+    NoteInput::cancelPendingTuplet(score);
+    EXPECT_FALSE(is.pendingTuplet());
+    EXPECT_EQ(is.duration().type(), DurationType::V_EIGHTH);
+
+    delete score;
+}
+
+TEST_F(Engraving_TupletTests, continuingTupletStepOutKeepsOuterRun)
+{
+    MasterScore* score = continuingTupletNestedScore();
+    ASSERT_TRUE(score);
+    InputState& is = score->inputState();
+
+    for (int i = 0; i < 3; ++i) {
+        enterNote(score);
+    }
+    ASSERT_EQ(is.continuingTuplet()->levels.size(), 2u);
+
+    // the duration becomes the outer note value, and the next notes are straight notes of the outer run
+    is.stepOutOfContinuingTuplet();
+    ASSERT_TRUE(is.continuingTuplet());
+    EXPECT_EQ(is.continuingTuplet()->levels.size(), 1u);
+    EXPECT_EQ(is.duration().type(), DurationType::V_QUARTER);
+    enterNote(score);
+    enterNote(score);
+    expectValid(score);
+    EXPECT_EQ(rhythm(measureAt(score, 0)), "3:2[ 3:2[8 8 8] 4 4] r2");
+
+    // the next outer tuplet has one level
+    enterNote(score);
+    expectValid(score);
+    EXPECT_EQ(rhythm(measureAt(score, 0)), "3:2[ 3:2[8 8 8] 4 4] 3:2[4 r4 r4]");
+    ASSERT_TRUE(is.continuingTuplet());
+    EXPECT_EQ(is.continuingTuplet()->levels.size(), 1u);
+
+    // the last level stops the run, and no run starts again in this tuplet
+    is.stepOutOfContinuingTuplet();
+    EXPECT_FALSE(is.continuingTuplet());
+    EXPECT_FALSE(is.startContinuingTupletInside());
+
+    delete score;
+}
+
+TEST_F(Engraving_TupletTests, continuingTupletStepOutInPartlyFilledTuplet)
+{
+    MasterScore* score = continuingTupletNestedScore();
+    ASSERT_TRUE(score);
+    InputState& is = score->inputState();
+
+    // the duration stays until the inner tuplet is full, and after it
+    enterNote(score);
+    enterNote(score);
+    is.stepOutOfContinuingTuplet();
+    ASSERT_TRUE(is.continuingTuplet());
+    EXPECT_EQ(is.duration().type(), DurationType::V_EIGHTH);
+    enterNote(score);
+    ASSERT_TRUE(is.continuingTuplet());
+    EXPECT_EQ(is.continuingTuplet()->levels.size(), 1u);
+    EXPECT_EQ(is.duration().type(), DurationType::V_EIGHTH);
+    enterNote(score);
+    expectValid(score);
+    EXPECT_EQ(rhythm(measureAt(score, 0)), "3:2[ 3:2[8 8 8] 8 r8 r4] r2");
+    EXPECT_TRUE(is.continuingTuplet());
+
+    delete score;
+}
+
+TEST_F(Engraving_TupletTests, continuingTupletStepOutLongerNoteSpills)
+{
+    MasterScore* score = continuingTupletNestedScore();
+    ASSERT_TRUE(score);
+    InputState& is = score->inputState();
+
+    // a quarter on the last note of the inner tuplet goes on, tied, in the outer tuplet
+    enterNote(score, 60);
+    enterNote(score, 62);
+    is.stepOutOfContinuingTuplet();
+    is.setDuration(DurationType::V_QUARTER);
+    enterNote(score, 64);
+    expectValid(score);
+    EXPECT_EQ(is.continuingTuplet()->levels.size(), 1u);
+    ChordRest* cr = continuingCrAt(score, Fraction(1, 6));
+    ASSERT_TRUE(cr && cr->isChord());
+    EXPECT_EQ(toChord(cr)->upNote()->pitch(), 64);
+    EXPECT_TRUE(toChord(cr)->upNote()->tieBack());
+    EXPECT_EQ(cr->tuplet()->baseLen().type(), DurationType::V_QUARTER);
+    EXPECT_FALSE(cr->tuplet()->tuplet());
+
+    delete score;
+}
+
+TEST_F(Engraving_TupletTests, continuingTupletStepOutThreeLevels)
+{
+    MasterScore* score = continuingTupletScore(NoteEntryMethod::BY_NOTE_NAME, false);
+    ASSERT_TRUE(score);
+    InputState& is = score->inputState();
+
+    // eighth triplets in quarter triplets in a half triplet; the input is in the innermost tuplet
+    ASSERT_TRUE(addTuplet(continuingCrAt(score, Fraction(0, 1)), Fraction(3, 2), TDuration(DurationType::V_HALF)));
+    ASSERT_TRUE(addTuplet(continuingCrAt(score, Fraction(0, 1)), Fraction(3, 2), TDuration(DurationType::V_QUARTER)));
+    ASSERT_TRUE(addTuplet(continuingCrAt(score, Fraction(0, 1)), Fraction(3, 2), TDuration(DurationType::V_EIGHTH)));
+    ASSERT_TRUE(is.startContinuingTupletInside());
+    ASSERT_EQ(is.continuingTuplet()->levels.size(), 3u);
+    enterNote(score);
+
+    for (size_t levels : { 2u, 1u }) {
+        is.stepOutOfContinuingTuplet();
+        ASSERT_TRUE(is.continuingTuplet());
+        EXPECT_EQ(is.continuingTuplet()->levels.size(), levels);
+        EXPECT_EQ(is.duration().type(), DurationType::V_EIGHTH);
+        EXPECT_TRUE(is.continuingTupletGoesOn());
+    }
+    is.stepOutOfContinuingTuplet();
+    EXPECT_FALSE(is.continuingTuplet());
+
+    delete score;
+}
+
+TEST_F(Engraving_TupletTests, continuingTupletStepOutThreeLevelsDuration)
+{
+    MasterScore* score = continuingTupletScore(NoteEntryMethod::BY_NOTE_NAME, false);
+    ASSERT_TRUE(score);
+    InputState& is = score->inputState();
+
+    // the first inner tuplets are full: each step gives the note value of the level left, until an inner tuplet is
+    // only partly filled
+    ASSERT_TRUE(addTuplet(continuingCrAt(score, Fraction(0, 1)), Fraction(3, 2), TDuration(DurationType::V_HALF)));
+    ASSERT_TRUE(addTuplet(continuingCrAt(score, Fraction(0, 1)), Fraction(3, 2), TDuration(DurationType::V_QUARTER)));
+    ASSERT_TRUE(addTuplet(continuingCrAt(score, Fraction(0, 1)), Fraction(3, 2), TDuration(DurationType::V_EIGHTH)));
+    ASSERT_TRUE(is.startContinuingTupletInside());
+    for (int i = 0; i < 3; ++i) {
+        enterNote(score);
+    }
+    is.stepOutOfContinuingTuplet();
+    EXPECT_EQ(is.duration().type(), DurationType::V_QUARTER);
+    is.stepOutOfContinuingTuplet();
+    EXPECT_EQ(is.duration().type(), DurationType::V_QUARTER);
+
+    delete score;
+}
+
+TEST_F(Engraving_TupletTests, continuingTupletStepOutMoves)
+{
+    MasterScore* score = continuingTupletNestedScore();
+    ASSERT_TRUE(score);
+    InputState& is = score->inputState();
+
+    for (int i = 0; i < 3; ++i) {
+        enterNote(score);
+    }
+    is.stepOutOfContinuingTuplet();
+
+    // back into the inner tuplet just left: nesting stays off, and a note there doesn't end the run
+    moveContinuingInput(score, Fraction(1, 9));
+    ASSERT_TRUE(is.continuingTuplet());
+    EXPECT_EQ(is.continuingTuplet()->levels.size(), 1u);
+    is.setDuration(DurationType::V_EIGHTH);
+    enterNote(score, 67);
+    expectValid(score);
+    ASSERT_TRUE(is.continuingTuplet());
+    EXPECT_EQ(is.continuingTuplet()->levels.size(), 1u);
+
+    // a different nested tuplet: all its levels
+    ASSERT_TRUE(addTuplet(continuingCrAt(score, Fraction(1, 1)), Fraction(3, 2), TDuration(DurationType::V_QUARTER)));
+    ASSERT_TRUE(addTuplet(continuingCrAt(score, Fraction(1, 1)), Fraction(3, 2), TDuration(DurationType::V_EIGHTH)));
+    moveContinuingInput(score, Fraction(1, 1));
+    ASSERT_TRUE(is.continuingTuplet());
+    EXPECT_EQ(is.continuingTuplet()->levels.size(), 2u);
+
+    delete score;
+}
+
+TEST_F(Engraving_TupletTests, continuingTupletStepOutLeaveAndComeBack)
+{
+    MasterScore* score = continuingTupletNestedScore();
+    ASSERT_TRUE(score);
+    InputState& is = score->inputState();
+
+    // the run goes on into a new outer tuplet of one level
+    for (int i = 0; i < 3; ++i) {
+        enterNote(score);
+    }
+    is.stepOutOfContinuingTuplet();
+    for (int i = 0; i < 3; ++i) {
+        enterNote(score);
+    }
+    moveContinuingInput(score, is.tick());
+    ASSERT_TRUE(is.continuingTuplet());
+    EXPECT_EQ(is.continuingTuplet()->levels.size(), 1u);
+
+    // out of the tuplet and back in gives all levels
+    moveContinuingInput(score, Fraction(1, 9));
+    ASSERT_TRUE(is.continuingTuplet());
+    EXPECT_EQ(is.continuingTuplet()->levels.size(), 2u);
+
+    // and stepping out works again
+    is.stepOutOfContinuingTuplet();
+    moveContinuingInput(score, Fraction(1, 18));
+    ASSERT_TRUE(is.continuingTuplet());
+    EXPECT_EQ(is.continuingTuplet()->levels.size(), 1u);
+
+    delete score;
+}
+
+TEST_F(Engraving_TupletTests, continuingTupletStepOutUndo)
+{
+    MasterScore* score = continuingTupletNestedScore();
+    ASSERT_TRUE(score);
+    InputState& is = score->inputState();
+
+    // C D E, Escape, F: the first undo takes F away and stays stepped out, the second takes E away and nests again
+    for (int i = 0; i < 3; ++i) {
+        enterNote(score);
+    }
+    is.stepOutOfContinuingTuplet();
+    enterNote(score);
+    score->undoRedo(true, nullptr);
+    ASSERT_TRUE(is.continuingTuplet());
+    EXPECT_EQ(is.continuingTuplet()->levels.size(), 1u);
+    EXPECT_EQ(is.duration().type(), DurationType::V_QUARTER);
+    EXPECT_TRUE(is.continuingTupletGoesOn());
+    score->undoRedo(true, nullptr);
+    ASSERT_TRUE(is.continuingTuplet());
+    EXPECT_EQ(is.continuingTuplet()->levels.size(), 2u);
+    EXPECT_EQ(is.duration().type(), DurationType::V_EIGHTH);
+
+    // C D E, Escape, undo: E goes, nesting back
+    enterNote(score);
+    is.stepOutOfContinuingTuplet();
+    score->undoRedo(true, nullptr);
+    ASSERT_TRUE(is.continuingTuplet());
+    EXPECT_EQ(is.continuingTuplet()->levels.size(), 2u);
+    enterNote(score);
+    expectValid(score);
+    EXPECT_EQ(rhythm(measureAt(score, 0)), "3:2[ 3:2[8 8 8] r4 r4] r2");
+
+    delete score;
+}
+
+TEST_F(Engraving_TupletTests, continuingTupletStepOutDotted)
+{
+    // a dotted or double-dotted level: the duration gets its dots, and the next note goes straight in the outer tuplet
+    for (int dots : { 1, 2 }) {
+        MasterScore* score = continuingTupletScore(NoteEntryMethod::BY_NOTE_NAME, false);
+        ASSERT_TRUE(score);
+        InputState& is = score->inputState();
+
+        TDuration outerLen(DurationType::V_QUARTER);
+        outerLen.setDots(dots);
+        TDuration innerLen(DurationType::V_EIGHTH);
+        innerLen.setDots(dots);
+        ASSERT_TRUE(addTuplet(continuingCrAt(score, Fraction(0, 1)), Fraction(3, 2), outerLen));
+        ASSERT_TRUE(addTuplet(continuingCrAt(score, Fraction(0, 1)), Fraction(3, 2), innerLen));
+        is.setDuration(innerLen);
+        ASSERT_TRUE(is.startContinuingTupletInside());
+        for (int i = 0; i < 3; ++i) {
+            enterNote(score);
+        }
+
+        is.stepOutOfContinuingTuplet();
+        ASSERT_TRUE(is.continuingTuplet());
+        EXPECT_EQ(is.duration(), outerLen);
+        const Fraction tick = is.tick();
+        enterNote(score);
+        expectValid(score);
+        ChordRest* cr = continuingCrAt(score, tick);
+        ASSERT_TRUE(cr && cr->isChord() && cr->tuplet());
+        EXPECT_EQ(cr->durationType(), outerLen);
+        EXPECT_EQ(cr->tuplet()->baseLen(), outerLen);
+        EXPECT_FALSE(cr->tuplet()->tuplet());
+
+        delete score;
+    }
 }
 
 TEST_F(Engraving_TupletTests, continuingTupletMouse)

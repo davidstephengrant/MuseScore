@@ -66,6 +66,7 @@ public:
 
     // continuing tuplet input: note input keeps creating the same tuplet
     virtual bool continueTupletsOn() const = 0;
+    virtual void stepOutOfContinuingTuplet() = 0;
     virtual void setContinueTuplets(bool on) = 0;
 
     virtual void doubleNoteInputDuration() = 0;

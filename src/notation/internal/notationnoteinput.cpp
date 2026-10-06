@@ -1015,6 +1015,22 @@ void NotationNoteInput::setContinueTuplets(bool on)
     }
 }
 
+// The innermost level of a nested run stops; with one level left, the run does
+void NotationNoteInput::stepOutOfContinuingTuplet()
+{
+    NoteInputState& is = score()->inputState();
+    if (!is.continuingTuplet()) {
+        return;
+    }
+    if (is.continuingTuplet()->levels.size() <= 1) {
+        setContinueTuplets(false);
+        return;
+    }
+
+    is.stepOutOfContinuingTuplet();
+    notifyAboutStateChanged();
+}
+
 // Elsewhere, the run that turning Continue tuplets off ended goes on from the input position
 bool NotationNoteInput::resumeContinuingTuplet()
 {
