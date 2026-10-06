@@ -93,6 +93,13 @@ NotationNoteInput::NotationNoteInput(const IGetScore* getScore, INotationInterac
         }
 
         cancelPendingTupletIfMoved();
+
+        // moving the input position elsewhere ends continuing tuplet input
+        NoteInputState& is = score()->inputState();
+        if (is.continuingTuplet() && !is.continuingTupletGoesOn()) {
+            is.setContinuingTuplet(std::nullopt);
+            notifyAboutStateChanged();
+        }
     });
 
     // screen readers hear when undo brings a pending tuplet back
@@ -101,6 +108,10 @@ NotationNoteInput::NotationNoteInput(const IGetScore* getScore, INotationInterac
     });
     if (m_undoStack) {
         m_undoStack->stackChanged().onNotify(this, [this]() {
+            // undo and redo bring continuing tuplet input back as it was, unless Continue tuplets was switched off since
+            if (!configuration()->continuingTupletInput()) {
+                forgetContinuingTuplets();
+            }
             announcePendingTupletChange();
         });
     }
@@ -124,6 +135,8 @@ void NotationNoteInput::startNoteInput(NoteInputMethod method, bool focusNotatio
     if (isNoteInputMode()) {
         return;
     }
+
+    m_pausedContinuingTuplet.reset();
 
     EngravingItem* el = resolveNoteInputStartPosition();
     if (!el) {
@@ -406,6 +419,9 @@ void NotationNoteInput::endNoteInput(bool resetState)
         return;
     }
 
+    endContinuingTuplets();
+    m_pausedContinuingTuplet.reset();
+
     InputState& is = score()->inputState();
     is.setNoteEntryMode(false);
     is.setPendingTuplet(std::nullopt);
@@ -463,6 +479,9 @@ void NotationNoteInput::setNoteInputMethod(NoteInputMethod method)
         m_cancelledTuplet = Tuplet::typeUserName(is.pendingTuplet()->ratio.numerator());
         is.setPendingTuplet(std::nullopt);
         m_tupletWasPending = false;
+    }
+    if (!is.continueTupletsAllowed()) {
+        endContinuingTuplets();
     }
     if (shouldSetupInputNote()) {
         setupInputNote();
@@ -523,6 +542,13 @@ void NotationNoteInput::applyNoteValueChange(const muse::TranslatableString& act
 void NotationNoteInput::setDuration(DurationType duration)
 {
     applyNoteValueChange(muse::TranslatableString("undoableAction", "Set duration"), [this, duration](mu::engraving::Transaction& tx) {
+        // with Continue tuplets on, a tuplet waiting for this duration becomes the continuing tuplet
+        NoteInputState& is = score()->inputState();
+        if (is.pendingTuplet()) {
+            PendingTuplet pending = *is.pendingTuplet();
+            pending.continuing = configuration()->continuingTupletInput();
+            is.setPendingTuplet(pending);
+        }
         NoteInput::setDuration(tx, score(), duration);
     });
 }
@@ -749,6 +775,11 @@ void NotationNoteInput::setCurrentVoice(voice_idx_t voiceIndex)
 
     inputState.setVoice(voiceIndex);
     cancelPendingTupletIfMoved();
+
+    // a voice change ends continuing tuplet input, even if the run could continue back in the old voice
+    if (inputState.continuingTuplet()) {
+        endContinuingTuplets();
+    }
     notifyAboutStateChanged();
 }
 
@@ -784,8 +815,8 @@ void NotationNoteInput::addTuplet(const TupletOptions& options)
     startEdit(TranslatableString("undoableAction", "Add tuplet"));
     score()->expandVoice();
     ChordRest* chordRest = inputState.cr();
+    Tuplet* tuplet = nullptr;
     if (chordRest) {
-        Tuplet* tuplet = nullptr;
         if (durationAsSubdivision) {
             tuplet = score()->addTuplet(chordRest, options.ratio, inputState.duration(), options.numberType, options.bracketType);
         } else {
@@ -800,6 +831,11 @@ void NotationNoteInput::addTuplet(const TupletOptions& options)
             score()->selectNewTuplet(tuplet);
         }
     }
+    if (tuplet && options.startsContinuingTuplets) {
+        startContinuingTuplet(tuplet);
+    }
+    // turning Continue tuplets on again continues this tuplet, not an earlier run
+    m_pausedContinuingTuplet.reset();
     apply();
 
     notifyAboutStateChanged();
@@ -843,6 +879,8 @@ bool NotationNoteInput::setPendingTuplet(const TupletOptions& options)
     pending.bracketType = options.bracketType;
     pending.autoBaseLen = options.autoBaseLen;
     pending.durationAsSubdivision = options.selectedDurationAs == TupletSelectedDuration::SUBDIVISION;
+    // with Continue tuplets on, it becomes the continuing tuplet when it is added
+    pending.continuing = configuration()->continuingTupletInput();
     if (is.usingNoteEntryMethod(NoteEntryMethod::BY_NOTE_NAME) || is.usingNoteEntryMethod(NoteEntryMethod::TIMEWISE)) {
         // the input duration sizes it now
         if (!NoteInput::setPendingTuplet(score(), pending)) {
@@ -856,6 +894,7 @@ bool NotationNoteInput::setPendingTuplet(const TupletOptions& options)
     }
 
     m_tupletWasPending = true;
+    m_pausedContinuingTuplet.reset();
     accessibilityController()->announce(pendingTupletAnnouncement(*is.pendingTuplet(), NoteInput::pendingTupletFitsHere(score())));
     notifyAboutStateChanged();
     return true;
@@ -925,6 +964,93 @@ void NotationNoteInput::announcePendingTupletChange()
     }
     if (!announcement.empty()) {
         accessibilityController()->announce(announcement);
+    }
+}
+
+bool NotationNoteInput::continueTupletsOn() const
+{
+    return isNoteInputMode() && score()->inputState().continuingTuplet();
+}
+
+// Continues the tuplet at or straight before the input position, if there is one
+void NotationNoteInput::setContinueTuplets(bool on)
+{
+    // a waiting tuplet becomes the continuing tuplet, or not, when it is added
+    if (score()->inputState().pendingTuplet()) {
+        PendingTuplet pending = *score()->inputState().pendingTuplet();
+        pending.continuing = on;
+        score()->inputState().setPendingTuplet(pending);
+    }
+
+    if (!on) {
+        if (score()->inputState().continuingTuplet()) {
+            m_pausedContinuingTuplet = score()->inputState().continuingTuplet();
+        }
+        endContinuingTuplets();
+        notifyAboutStateChanged();
+        return;
+    }
+
+    const NoteInputState& is = score()->inputState();
+    if (!isNoteInputMode() || !is.continueTupletsAllowed() || continueTupletsOn()) {
+        return;
+    }
+
+    if (const Tuplet* tuplet = is.tupletToContinue()) {
+        // a nested run goes on with all its levels, from the innermost note value
+        const ContinuingTuplet continuing = ContinuingTuplet::continuing(tuplet, m_pausedContinuingTuplet);
+        m_pausedContinuingTuplet.reset();
+        score()->inputState().setContinuingTuplet(continuing);
+        if (continuing.levels.size() > ContinuingTuplet::of(tuplet).levels.size()) {
+            score()->inputState().setDuration(continuing.levels.back().baseLen);
+        }
+        notifyAboutStateChanged();
+    } else if (resumeContinuingTuplet()) {
+        notifyAboutStateChanged();
+    }
+}
+
+// Elsewhere, the run that turning Continue tuplets off ended goes on from the input position
+bool NotationNoteInput::resumeContinuingTuplet()
+{
+    const std::optional<ContinuingTuplet> paused = m_pausedContinuingTuplet;
+    m_pausedContinuingTuplet.reset();
+
+    // not where a tuplet waits, nor inside another tuplet
+    NoteInputState& is = score()->inputState();
+    const ChordRest* cr = is.cr();
+    if (!paused || is.pendingTuplet() || (cr && cr->tuplet())) {
+        return false;
+    }
+
+    is.resumeContinuingTuplet(*paused);
+    // the first note gets the tuplet's note value, as when a waiting tuplet starts the run
+    is.setDuration(paused->levels.back().baseLen);
+    return true;
+}
+
+void NotationNoteInput::startContinuingTuplet(const Tuplet* tuplet)
+{
+    NoteInputState& is = score()->inputState();
+    if (is.continueTupletsAllowed()) {
+        is.setContinuingTuplet(ContinuingTuplet::of(tuplet));
+    }
+}
+
+void NotationNoteInput::endContinuingTuplets()
+{
+    score()->inputState().setContinuingTuplet(std::nullopt);
+}
+
+// Continuing tuplets are switched off: neither the run nor a waiting tuplet starts one
+void NotationNoteInput::forgetContinuingTuplets()
+{
+    NoteInputState& is = score()->inputState();
+    endContinuingTuplets();
+    if (is.pendingTuplet() && is.pendingTuplet()->continuing) {
+        PendingTuplet pending = *is.pendingTuplet();
+        pending.continuing = false;
+        is.setPendingTuplet(pending);
     }
 }
 

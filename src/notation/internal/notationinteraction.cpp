@@ -5412,9 +5412,15 @@ void NotationInteraction::repeatSelection()
             transaction(TranslatableString("undoableAction", "Repeat selection"), [&](engraving::Transaction& tx) {
                 for (Note* note : c->notes()) {
                     NoteVal nval = note->noteVal();
-                    NoteInput::addPitch(tx, score(), nval, note != c->notes()[0]);
+                    const bool first = note == c->notes()[0];
+                    // if the chord can't be entered, its other notes mustn't go onto the previous chord
+                    if (!NoteInput::addPitch(tx, score(), nval, !first) && first) {
+                        break;
+                    }
                 }
             });
+            // e.g. where a continuing tuplet's time can't be inserted
+            checkAndShowError();
         }
         return;
     }
@@ -5794,6 +5800,10 @@ void NotationInteraction::putRest(Duration duration)
     score()->cmdEnterRest(duration);
 
     notifyAboutNotationChanged();
+    // entering the rest can end continuing tuplet input
+    notifyAboutNoteInputStateChanged();
+
+    checkAndShowError();
 }
 
 void NotationInteraction::addBracketsToSelection(BracketsType type)

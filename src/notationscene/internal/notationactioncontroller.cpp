@@ -1581,7 +1581,10 @@ void NotationActionController::putTuplet(const TupletOptions& options)
             interaction->checkAndShowError();
             return;
         }
-        noteInput->addTuplet(options);
+        // with Continue tuplets on, every tuplet added this way becomes the continuing tuplet
+        TupletOptions continuingOptions = options;
+        continuingOptions.startsContinuingTuplets = configuration()->continuingTupletInput();
+        noteInput->addTuplet(continuingOptions);
     } else {
         interaction->addTupletToSelectedChordRests(options);
     }

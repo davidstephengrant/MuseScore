@@ -64,6 +64,10 @@ public:
     // e.g. "Triplet waiting for a duration", or empty if no tuplet is pending
     virtual muse::String pendingTupletInfo() const = 0;
 
+    // continuing tuplet input: note input keeps creating the same tuplet
+    virtual bool continueTupletsOn() const = 0;
+    virtual void setContinueTuplets(bool on) = 0;
+
     virtual void doubleNoteInputDuration() = 0;
     virtual void halveNoteInputDuration() = 0;
 

@@ -324,6 +324,8 @@ Note* NotationMidiInput::addNoteToScore(const muse::midi::Event& e)
 
     DEFER {
         m_undoStack->commitChanges();
+        // e.g. where a continuing tuplet's time can't be inserted
+        m_notationInteraction->checkAndShowError();
     };
 
     m_undoStack->prepareChanges(muse::TranslatableString("undoableAction", "Enter note"));

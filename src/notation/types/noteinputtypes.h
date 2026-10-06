@@ -54,5 +54,8 @@ struct TupletOptions
     // SUBDIVISION: the selected duration is the subdivision (3:2 on an eighth: 3 eighths in the time of 2);
     // TUPLET_LENGTH: the tuplet divides it
     engraving::TupletSelectedDuration selectedDurationAs = engraving::TupletSelectedDuration::TUPLET_LENGTH;
+
+    // In note input, the tuplet becomes the continuing tuplet
+    bool startsContinuingTuplets = false;
 };
 }

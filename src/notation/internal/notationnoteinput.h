@@ -76,6 +76,9 @@ public:
     void forgetPendingTuplets() override;
     muse::String pendingTupletInfo() const override;
 
+    bool continueTupletsOn() const override;
+    void setContinueTuplets(bool on) override;
+
     void addSlur(mu::engraving::Slur* slur) override;
     void resetSlur() override;
     void addTie() override;
@@ -121,6 +124,11 @@ private:
     void startEdit(const muse::TranslatableString& actionName);
     void apply();
 
+    void startContinuingTuplet(const mu::engraving::Tuplet* tuplet);
+    bool resumeContinuingTuplet();
+    void endContinuingTuplets();
+    void forgetContinuingTuplets();
+
     void updateInputState();
     void notifyAboutStateChanged();
     void notifyNoteAddedChanged();
@@ -144,6 +152,8 @@ private:
     muse::String m_cancelledTuplet;
     // the input method just switched to, named first in the next announcement
     std::optional<NoteInputMethod> m_newNoteInputMethod;
+    // the run that turning Continue tuplets off ended, for turning them on again
+    std::optional<mu::engraving::ContinuingTuplet> m_pausedContinuingTuplet;
 };
 }
 
