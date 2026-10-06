@@ -92,12 +92,10 @@ NotationNoteInput::NotationNoteInput(const IGetScore* getScore, INotationInterac
             }
         }
 
-        cancelPendingTupletIfMoved();
-
-        // moving the input position elsewhere ends continuing tuplet input
-        NoteInputState& is = score()->inputState();
-        if (is.continuingTuplet() && !is.continuingTupletGoesOn()) {
-            is.setContinuingTuplet(std::nullopt);
+        // one state change, so that screen readers hear both in one announcement
+        const bool cancelled = cancelPendingTupletIfMoved();
+        const bool continuingChanged = updateContinuingTupletsAfterMove();
+        if (cancelled || continuingChanged) {
             notifyAboutStateChanged();
         }
     });
@@ -187,6 +185,11 @@ void NotationNoteInput::startNoteInput(NoteInputMethod method, bool focusNotatio
     }
     case StaffGroup::PERCUSSION:
         break;
+    }
+
+    // with continuing tuplets switched on, note input started in a tuplet continues it
+    if (configuration()->continuingTupletInput()) {
+        is.startContinuingTupletInside();
     }
 
     notifyAboutNoteInputStarted(focusNotation);
@@ -482,6 +485,8 @@ void NotationNoteInput::setNoteInputMethod(NoteInputMethod method)
     }
     if (!is.continueTupletsAllowed()) {
         endContinuingTuplets();
+    } else if (configuration()->continuingTupletInput()) {
+        is.startContinuingTupletInside();
     }
     if (shouldSetupInputNote()) {
         setupInputNote();
@@ -776,10 +781,7 @@ void NotationNoteInput::setCurrentVoice(voice_idx_t voiceIndex)
     inputState.setVoice(voiceIndex);
     cancelPendingTupletIfMoved();
 
-    // a voice change ends continuing tuplet input, even if the run could continue back in the old voice
-    if (inputState.continuingTuplet()) {
-        endContinuingTuplets();
-    }
+    updateContinuingTupletsAfterMove(/*newVoice*/ true);
     notifyAboutStateChanged();
 }
 
@@ -932,16 +934,18 @@ String NotationNoteInput::pendingTupletInfo() const
                                                        NoteInput::pendingTupletFitsHere(score())) : String();
 }
 
-// Moving the input position elsewhere cancels a pending tuplet
-void NotationNoteInput::cancelPendingTupletIfMoved()
+// Moving the input position elsewhere cancels a pending tuplet; true if it did
+bool NotationNoteInput::cancelPendingTupletIfMoved()
 {
     NoteInputState& is = score()->inputState();
-    if (is.pendingTuplet() && !is.pendingTupletHere()) {
-        m_cancelledTuplet = Tuplet::typeUserName(is.pendingTuplet()->ratio.numerator());
-        is.setPendingTuplet(std::nullopt);
-        m_tupletWasPending = false;
-        notifyAboutStateChanged();
+    if (!is.pendingTuplet() || is.pendingTupletHere()) {
+        return false;
     }
+
+    m_cancelledTuplet = Tuplet::typeUserName(is.pendingTuplet()->ratio.numerator());
+    is.setPendingTuplet(std::nullopt);
+    m_tupletWasPending = false;
+    return true;
 }
 
 void NotationNoteInput::announcePendingTupletChange()
@@ -986,7 +990,8 @@ void NotationNoteInput::setContinueTuplets(bool on)
         if (score()->inputState().continuingTuplet()) {
             m_pausedContinuingTuplet = score()->inputState().continuingTuplet();
         }
-        endContinuingTuplets();
+        // e.g. Escape: no run starts again in this tuplet
+        score()->inputState().stopContinuingTuplet();
         notifyAboutStateChanged();
         return;
     }
@@ -1052,6 +1057,20 @@ void NotationNoteInput::forgetContinuingTuplets()
         pending.continuing = false;
         is.setPendingTuplet(pending);
     }
+}
+
+// Moving the input position elsewhere, or to another voice, ends continuing tuplet input; with continuing tuplets switched on,
+// moving into a tuplet starts it. True if either happened.
+bool NotationNoteInput::updateContinuingTupletsAfterMove(bool newVoice)
+{
+    NoteInputState& is = score()->inputState();
+    bool ended = false;
+    if (is.continuingTuplet() && (newVoice || !is.continuingTupletGoesOn())) {
+        endContinuingTuplets();
+        ended = true;
+    }
+    const bool started = isNoteInputMode() && configuration()->continuingTupletInput() && is.startContinuingTupletInside();
+    return ended || started;
 }
 
 static muse::RectF segmentContentRect(const Segment* segment, track_idx_t track)

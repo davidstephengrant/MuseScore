@@ -158,7 +158,7 @@ public:
     virtual void setTupletCommandsSelectedDurationAs(engraving::TupletSelectedDuration selectedDurationAs) = 0;
     virtual muse::async::Notification tupletCommandsSelectedDurationAsChanged() const = 0;
 
-    // continuing tuplets: a tuplet added during note input starts continuing tuplet input;
+    // continuing tuplets: a tuplet added during note input, or note input in a tuplet, starts continuing tuplet input;
     // kept for the session only, so it's off at each launch
     virtual bool continuingTupletInput() const = 0;
     virtual void setContinuingTupletInput(bool continuing) = 0;

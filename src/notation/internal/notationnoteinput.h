@@ -115,7 +115,7 @@ private:
 
     bool shouldSetupInputNote() const;
 
-    void cancelPendingTupletIfMoved();
+    bool cancelPendingTupletIfMoved();
     void announcePendingTupletChange();
     void setupInputNote();
 
@@ -128,6 +128,7 @@ private:
     bool resumeContinuingTuplet();
     void endContinuingTuplets();
     void forgetContinuingTuplets();
+    bool updateContinuingTupletsAfterMove(bool newVoice = false);
 
     void updateInputState();
     void notifyAboutStateChanged();
