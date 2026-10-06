@@ -100,9 +100,9 @@ NotationNoteInput::NotationNoteInput(const IGetScore* getScore, INotationInterac
         }
     });
 
-    // screen readers hear when undo brings a pending tuplet back
+    // screen readers hear when undo brings a pending tuplet back, or a continuing tuplet run starts or stops
     m_stateChanged.onNotify(this, [this]() {
-        announcePendingTupletChange();
+        announceTupletChanges();
     });
     if (m_undoStack) {
         m_undoStack->stackChanged().onNotify(this, [this]() {
@@ -110,7 +110,7 @@ NotationNoteInput::NotationNoteInput(const IGetScore* getScore, INotationInterac
             if (!configuration()->continuingTupletInput()) {
                 forgetContinuingTuplets();
             }
-            announcePendingTupletChange();
+            announceTupletChanges();
         });
     }
 }
@@ -191,12 +191,19 @@ void NotationNoteInput::startNoteInput(NoteInputMethod method, bool focusNotatio
     if (configuration()->continuingTupletInput()) {
         is.startContinuingTupletInside();
     }
+    const bool continuingTupletsStarted = bool(is.continuingTuplet());
+    m_continueTupletsWereOn = continuingTupletsStarted; // announced below with the input method
 
     notifyAboutNoteInputStarted(focusNotation);
     notifyAboutStateChanged();
 
     m_interaction->showItem(el);
-    accessibilityController()->announce(nameOfNoteInputMethod(method).translated());
+    if (continuingTupletsStarted) {
+        accessibilityController()->announce(muse::mtrc("notation", "%1, continuing tuplets")
+                                            .arg(nameOfNoteInputMethod(method).translated()));
+    } else {
+        accessibilityController()->announce(nameOfNoteInputMethod(method).translated());
+    }
 }
 
 EngravingItem* NotationNoteInput::resolveNoteInputStartPosition() const
@@ -897,7 +904,8 @@ bool NotationNoteInput::setPendingTuplet(const TupletOptions& options)
 
     m_tupletWasPending = true;
     m_pausedContinuingTuplet.reset();
-    accessibilityController()->announce(pendingTupletAnnouncement(*is.pendingTuplet(), NoteInput::pendingTupletFitsHere(score())));
+    accessibilityController()->announce(pendingTupletAnnouncement(NoteInput::pendingTupletAsAdded(score()),
+                                                                  NoteInput::pendingTupletFitsHere(score())));
     notifyAboutStateChanged();
     return true;
 }
@@ -910,16 +918,10 @@ void NotationNoteInput::cancelPendingTuplet()
     }
 
     const PendingTuplet& pending = *is.pendingTuplet();
-    const bool nested = !pending.nested.empty();
-    const String type = Tuplet::typeUserName((nested ? pending.nested.back() : pending).ratio.numerator());
+    m_cancelledTupletWasNested = !pending.nested.empty();
+    m_cancelledTuplet = Tuplet::typeUserName((m_cancelledTupletWasNested ? pending.nested.back() : pending).ratio.numerator());
     NoteInput::cancelPendingTuplet(score());
-
     m_tupletWasPending = is.pendingTuplet().has_value();
-    accessibilityController()->announce(nested
-                                        //: %1 is a tuplet type in lower case, e.g. "triplet"
-                                        ? muse::mtrc("notation", "Nested %1 cancelled").arg(type.toLower())
-                                        //: %1 is a tuplet type, e.g. "Triplet"
-                                        : muse::mtrc("notation", "%1 cancelled").arg(type));
     notifyAboutStateChanged();
 }
 
@@ -930,7 +932,7 @@ void NotationNoteInput::forgetPendingTuplets()
 
 String NotationNoteInput::pendingTupletInfo() const
 {
-    return tupletPending() ? pendingTupletAnnouncement(*score()->inputState().pendingTuplet(),
+    return tupletPending() ? pendingTupletAnnouncement(NoteInput::pendingTupletAsAdded(score()),
                                                        NoteInput::pendingTupletFitsHere(score())) : String();
 }
 
@@ -948,27 +950,23 @@ bool NotationNoteInput::cancelPendingTupletIfMoved()
     return true;
 }
 
-void NotationNoteInput::announcePendingTupletChange()
+String NotationNoteInput::pendingTupletChange()
 {
     const bool pending = tupletPending();
-    String announcement;
-    if (!m_cancelledTuplet.empty()) {
-        //: %1 is a tuplet type, e.g. "Triplet"
-        announcement = muse::mtrc("notation", "%1 cancelled").arg(m_cancelledTuplet);
-        m_cancelledTuplet.clear();
-    } else if (pending && !m_tupletWasPending) {
-        announcement = pendingTupletAnnouncement(*score()->inputState().pendingTuplet(), NoteInput::pendingTupletFitsHere(score()));
-    }
+    const bool changed = pending && !m_tupletWasPending;
     m_tupletWasPending = pending;
-
-    // a switched input method comes first, as when note input starts
-    const std::optional<NoteInputMethod> newMethod = std::exchange(m_newNoteInputMethod, std::nullopt);
-    if (!announcement.empty() && newMethod) {
-        announcement = nameOfNoteInputMethod(*newMethod).translated() + u", " + announcement;
+    if (!m_cancelledTuplet.empty()) {
+        const String cancelled = m_cancelledTupletWasNested
+                                 //: %1 is a tuplet type in lower case, e.g. "triplet"
+                                 ? muse::mtrc("notation", "Nested %1 cancelled").arg(m_cancelledTuplet.toLower())
+                                 //: %1 is a tuplet type, e.g. "Triplet"
+                                 : muse::mtrc("notation", "%1 cancelled").arg(m_cancelledTuplet);
+        m_cancelledTuplet.clear();
+        m_cancelledTupletWasNested = false;
+        return cancelled;
     }
-    if (!announcement.empty()) {
-        accessibilityController()->announce(announcement);
-    }
+    return changed ? pendingTupletAnnouncement(NoteInput::pendingTupletAsAdded(score()), NoteInput::pendingTupletFitsHere(score()))
+           : String();
 }
 
 bool NotationNoteInput::continueTupletsOn() const
@@ -1027,6 +1025,7 @@ void NotationNoteInput::stepOutOfContinuingTuplet()
         return;
     }
 
+    m_steppedOutOfTuplet = Tuplet::typeUserName(is.continuingTuplet()->levels.back().ratio.numerator());
     is.stepOutOfContinuingTuplet();
     notifyAboutStateChanged();
 }
@@ -1058,6 +1057,61 @@ void NotationNoteInput::startContinuingTuplet(const Tuplet* tuplet)
     }
 }
 
+String NotationNoteInput::continuingTupletChange()
+{
+    const bool on = isNoteInputMode() && score()->inputState().continuingTuplet();
+    const bool changed = on != m_continueTupletsWereOn && isNoteInputMode();
+    m_continueTupletsWereOn = on;
+    if (!m_steppedOutOfTuplet.empty()) {
+        //: %1 is a tuplet type in lower case, e.g. "triplet"
+        const String stopped = muse::mtrc("notation", "Nested %1 stopped").arg(m_steppedOutOfTuplet.toLower());
+        m_steppedOutOfTuplet.clear();
+        return stopped;
+    }
+    if (!changed) {
+        return String();
+    }
+    if (on) {
+        return muse::mtrc("notation", "Continuing tuplets");
+    }
+    // the note after a red ghost ends the run
+    return m_continuingTupletHadNoSpace ? muse::mtrc("notation", "Stopped continuing tuplets, no room for the next tuplet")
+           : muse::mtrc("notation", "Stopped continuing tuplets");
+}
+
+// Where the next continuing tuplet doesn't fit
+String NotationNoteInput::continuingTupletNoSpaceChange()
+{
+    const NoteInputState& is = score()->inputState();
+    const bool noSpace = isNoteInputMode() && !is.pendingTupletHere() && !NoteInput::nextContinuingTupletFits(score(), is);
+    const bool changed = noSpace != m_continuingTupletHadNoSpace;
+    m_continuingTupletHadNoSpace = noSpace;
+    return changed && noSpace ? muse::mtrc("notation", "Next tuplet doesn’t fit") : String();
+}
+
+// One announcement, so that a later change doesn't cut off an earlier one
+void NotationNoteInput::announceTupletChanges()
+{
+    String announcement;
+    for (const String& change : { pendingTupletChange(), continuingTupletChange(), continuingTupletNoSpaceChange() }) {
+        if (change.empty()) {
+            continue;
+        }
+        if (!announcement.empty()) {
+            announcement += u", ";
+        }
+        announcement += change;
+    }
+    // a switched input method comes first, as when note input starts
+    const std::optional<NoteInputMethod> newMethod = std::exchange(m_newNoteInputMethod, std::nullopt);
+    if (!announcement.empty() && newMethod) {
+        announcement = nameOfNoteInputMethod(*newMethod).translated() + u", " + announcement;
+    }
+    if (!announcement.empty()) {
+        accessibilityController()->announce(announcement);
+    }
+}
+
 void NotationNoteInput::endContinuingTuplets()
 {
     score()->inputState().setContinuingTuplet(std::nullopt);
@@ -1084,8 +1138,12 @@ bool NotationNoteInput::updateContinuingTupletsAfterMove(bool newVoice)
     if (is.continuingTuplet() && (newVoice || !is.continuingTupletGoesOn())) {
         endContinuingTuplets();
         ended = true;
+        m_continuingTupletHadNoSpace = false; // moving ended it, not the lack of room
     }
     const bool started = isNoteInputMode() && configuration()->continuingTupletInput() && is.startContinuingTupletInside();
+    if (ended && started) {
+        m_continueTupletsWereOn = false; // a new run
+    }
     return ended || started;
 }
 

@@ -117,7 +117,7 @@ private:
     bool shouldSetupInputNote() const;
 
     bool cancelPendingTupletIfMoved();
-    void announcePendingTupletChange();
+    muse::String pendingTupletChange();
     void setupInputNote();
 
     NoteVal noteValForLine(int line) const;
@@ -130,6 +130,9 @@ private:
     void endContinuingTuplets();
     void forgetContinuingTuplets();
     bool updateContinuingTupletsAfterMove(bool newVoice = false);
+    muse::String continuingTupletChange();
+    muse::String continuingTupletNoSpaceChange();
+    void announceTupletChanges();
 
     void updateInputState();
     void notifyAboutStateChanged();
@@ -152,8 +155,14 @@ private:
     bool m_tupletWasPending = false;
     // the type of the pending tuplet that moving elsewhere or switching the input method cancelled, for the next announcement
     muse::String m_cancelledTuplet;
+    bool m_cancelledTupletWasNested = false;
+    muse::String m_steppedOutOfTuplet;
     // the input method just switched to, named first in the next announcement
     std::optional<NoteInputMethod> m_newNoteInputMethod;
+
+    // a continuing tuplet run was on at the last state change
+    bool m_continueTupletsWereOn = false;
+    bool m_continuingTupletHadNoSpace = false;
     // the run that turning Continue tuplets off ended, for turning them on again
     std::optional<mu::engraving::ContinuingTuplet> m_pausedContinuingTuplet;
 };

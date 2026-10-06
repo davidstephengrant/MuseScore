@@ -2631,6 +2631,9 @@ void NotationActionController::toggleContinueTuplets()
     if (noteInput && noteInput->isNoteInputMode()) {
         noteInput->setContinueTuplets(on);
     }
+
+    accessibilityController()->announce(on ? muse::mtrc("notation", "Continue tuplets on")
+                                        : muse::mtrc("notation", "Continue tuplets off"));
 }
 
 void NotationActionController::openStaffTextPropertiesDialog()
