@@ -357,7 +357,9 @@ MenuItemList AppMenuModel::makeTupletsItems()
         makeMenuItem(notation::ADD_SEPTUPLET_COMMAND),
         makeMenuItem(notation::ADD_OCTUPLET_COMMAND),
         makeMenuItem(notation::ADD_NONUPLET_COMMAND),
-        makeMenuItem(notation::OPEN_TUPLET_CONFIGURE_COMMAND)
+        makeMenuItem(notation::OPEN_TUPLET_CONFIGURE_COMMAND),
+        makeSeparator(),
+        makeMenuItem(notation::TOGGLE_STICKY_TUPLETS_COMMAND)
     };
 
     return items;

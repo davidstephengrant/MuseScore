@@ -373,6 +373,10 @@ void NotationCommandsState::init()
         updateCommandStates({ TOGGLE_AUTOMATION_COMMAND });
     });
 
+    configuration()->stickyTupletInputChanged().onNotify(this, [this]() {
+        updateCommandStates({ TOGGLE_STICKY_TUPLETS_COMMAND });
+    });
+
     controller()->debuggingOptionsChanged().onNotify(this, [this]() {
         updateCommandStates(DEBUG_COMMANDS);
     });
@@ -394,6 +398,7 @@ void NotationCommandsState::deinit()
     controller()->scoreConfigChanged().disconnect(this);
     controller()->notationStyleChanged().disconnect(this);
     controller()->automationModeEnabledChanged().disconnect(this);
+    configuration()->stickyTupletInputChanged().disconnect(this);
     controller()->debuggingOptionsChanged().disconnect(this);
 }
 
@@ -519,6 +524,10 @@ CommandState NotationCommandsState::doCommandState(const Command& command) const
 
     if (command == TOGGLE_AUTOMATION_COMMAND) {
         return CommandState(true, controller()->isAutomationModeEnabled());
+    }
+
+    if (command == TOGGLE_STICKY_TUPLETS_COMMAND) {
+        return CommandState(true, configuration()->stickyTupletInput());
     }
 
     if (muse::contains(DEBUG_COMMANDS, command)) {

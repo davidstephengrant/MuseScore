@@ -210,6 +210,7 @@ private:
     void openTransposeDialog();
     void openPartsDialog();
     void openTupletOtherDialog();
+    void toggleStickyTuplets();
     void openStaffTextPropertiesDialog();
     void openMeasurePropertiesDialog();
     void openEditGridSizeDialog();

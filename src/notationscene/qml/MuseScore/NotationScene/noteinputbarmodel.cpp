@@ -271,7 +271,9 @@ MenuItemList NoteInputBarModel::makeTupletItems()
         makeMenuItem(ADD_SEPTUPLET_COMMAND),
         makeMenuItem(ADD_OCTUPLET_COMMAND),
         makeMenuItem(ADD_NONUPLET_COMMAND),
-        makeMenuItem(OPEN_TUPLET_CONFIGURE_COMMAND)
+        makeMenuItem(OPEN_TUPLET_CONFIGURE_COMMAND),
+        makeSeparator(),
+        makeMenuItem(TOGGLE_STICKY_TUPLETS_COMMAND)
     };
 
     return items;
