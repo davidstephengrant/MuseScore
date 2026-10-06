@@ -1,0 +1,112 @@
+name: 'Lab: base builds'
+
+# Keeps development builds of upstream's base branches ready for the test lab.
+# Fork only: pushes lab-* branches here and starts the build workflows on them.
+
+on:
+  schedule:
+    - cron: '30 4 * * *'
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: 'Upstream commit to build (leave empty to sync the bases)'
+        default: ''
+        required: false
+      base:
+        description: 'Upstream branch the commit belongs to'
+        default: 'main'
+        required: false
+
+permissions:
+  contents: write
+  actions: write
+
+env:
+  BASES: "main 4.7"
+  UPSTREAM_REPO: musescore/MuseScore
+  BUILDS: "Build: Linux|Build: Windows|Build: macOS"
+  KEEP_DAYS: 30
+
+jobs:
+  lab:
+    if: github.repository == 'davidstephengrant/MuseScore'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Push lab branches and start builds
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # GITHUB_TOKEN can't push commits that change .github/workflows,
+          # so a token with Contents and Workflows write is used when set
+          PUSH_TOKEN: ${{ secrets.LAB_PUSH_TOKEN || github.token }}
+          FORK: ${{ github.repository }}
+          IN_SHA: ${{ inputs.sha }}
+          IN_BASE: ${{ inputs.base || 'main' }}
+        run: |
+          set -euo pipefail
+
+          # Prints the commit a fork branch points at, or nothing
+          fork_sha() {
+            gh api "repos/$FORK/git/matching-refs/heads/$1" \
+              --jq ".[] | select(.ref == \"refs/heads/$1\") | .object.sha"
+          }
+
+          set_branch() {
+            local branch=$1 sha=$2
+            if [ -n "$(fork_sha "$branch")" ]; then
+              GH_TOKEN=$PUSH_TOKEN gh api -X PATCH "repos/$FORK/git/refs/heads/$branch" \
+                -f sha="$sha" -F force=true --silent
+            else
+              GH_TOKEN=$PUSH_TOKEN gh api -X POST "repos/$FORK/git/refs" \
+                -f ref="refs/heads/$branch" -f sha="$sha" --silent
+            fi
+            echo "$branch -> $sha"
+          }
+
+          start_builds() {
+            local branch=$1 name
+            IFS='|' read -ra names <<< "$BUILDS"
+            for name in "${names[@]}"; do
+              gh workflow run "$name" --repo "$FORK" --ref "$branch"
+              echo "Started '$name' on $branch"
+            done
+          }
+
+          if [ -n "$IN_SHA" ]; then
+            sha=$(gh api "repos/$UPSTREAM_REPO/commits/$IN_SHA" --jq .sha)
+            branch="lab-$IN_BASE-${sha:0:7}"
+            if [ "$(fork_sha "$branch")" != "$sha" ]; then
+              set_branch "$branch" "$sha"
+            fi
+            start_builds "$branch"
+          else
+            for base in $BASES; do
+              sha=$(gh api "repos/$UPSTREAM_REPO/branches/$base" --jq .commit.sha)
+              branch="lab-$base"
+              if [ "$(fork_sha "$branch")" = "$sha" ]; then
+                echo "$branch is already at $sha"
+                continue
+              fi
+              set_branch "$branch" "$sha"
+              start_builds "$branch"
+            done
+          fi
+
+          # Delete lab-<base>-<sha7> branches not built for KEEP_DAYS days
+          cutoff=$(date -u -d "$KEEP_DAYS days ago" +%s)
+          gh api "repos/$FORK/git/matching-refs/heads/lab-" --paginate \
+            --jq '.[] | "\(.ref) \(.object.sha)"' |
+          while read -r ref sha; do
+            branch=${ref#refs/heads/}
+            [[ $branch =~ ^lab-.+-[0-9a-f]{7}$ ]] || continue
+            # Age from the last build on the branch, else from the commit
+            when=$(gh api "repos/$FORK/actions/runs?branch=$branch&per_page=1" \
+              --jq '.workflow_runs[0].created_at // empty')
+            if [ -z "$when" ]; then
+              when=$(gh api "repos/$FORK/commits/$sha" --jq .commit.committer.date)
+            fi
+            if [ "$(date -u -d "$when" +%s)" -lt "$cutoff" ]; then
+              GH_TOKEN=$PUSH_TOKEN gh api -X DELETE "repos/$FORK/git/refs/heads/$branch" --silent
+              echo "Deleted $branch (last activity $when)"
+            fi
+          done
