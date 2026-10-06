@@ -62,6 +62,10 @@ public:
     // Escape: the tuplets that waited so far don't come back with undo
     virtual void forgetPendingTuplets() = 0;
 
+    // sticky tuplet input: note input keeps creating the same tuplet
+    virtual bool stickyTupletsOn() const = 0;
+    virtual void setStickyTuplets(bool on) = 0;
+
     virtual void doubleNoteInputDuration() = 0;
     virtual void halveNoteInputDuration() = 0;
 

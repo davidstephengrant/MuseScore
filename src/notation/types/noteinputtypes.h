@@ -69,5 +69,8 @@ struct TupletOptions
 
     // Use the selected duration as the note value instead of dividing it (3:2 on an eighth: 3 eighths in the time of 2)
     bool selectedDurationAsNoteValue = false;
+
+    // In note input, the tuplet becomes the sticky tuplet
+    bool startsStickyTuplets = false;
 };
 }

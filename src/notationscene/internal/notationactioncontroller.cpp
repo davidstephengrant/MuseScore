@@ -1570,7 +1570,10 @@ void NotationActionController::putTuplet(const TupletOptions& options, bool canW
             interaction->checkAndShowError();
             return;
         }
-        noteInput->addTuplet(options);
+        // with sticky tuplets enabled, every tuplet added this way becomes the sticky tuplet
+        TupletOptions stickyOptions = options;
+        stickyOptions.startsStickyTuplets = configuration()->stickyTupletInput();
+        noteInput->addTuplet(stickyOptions);
     } else {
         interaction->addTupletToSelectedChordRests(options);
     }

@@ -75,6 +75,9 @@ public:
     void cancelPendingTuplet() override;
     void forgetPendingTuplets() override;
 
+    bool stickyTupletsOn() const override;
+    void setStickyTuplets(bool on) override;
+
     void addSlur(mu::engraving::Slur* slur) override;
     void resetSlur() override;
     void addTie() override;
@@ -120,6 +123,10 @@ private:
     void startEdit(const muse::TranslatableString& actionName);
     void apply();
 
+    void startStickyTuplet(const mu::engraving::Tuplet* tuplet);
+    bool resumeStickyTuplet();
+    void endStickyTuplets();
+
     void updateInputState();
     void notifyAboutStateChanged();
     void notifyNoteAddedChanged();
@@ -139,6 +146,8 @@ private:
 
     // a tuplet was pending at the last state change
     bool m_tupletWasPending = false;
+    // the run that turning sticky tuplets off ended, for turning them on again
+    std::optional<mu::engraving::StickyTuplet> m_pausedStickyTuplet;
 };
 }
 

@@ -207,6 +207,11 @@ void MScoreErrorsController::checkAndShowMScoreError()
         title = muse::trc("notation", "Cannot create tuplet");
         message = muse::trc("notation", "A tuplet can’t be inserted inside another tuplet.");
         break;
+    case MsError::NO_SPACE_FOR_STICKY_TUPLET:
+        title = muse::trc("notation", "Cannot create tuplet");
+        message = muse::trc("notation", "There isn’t enough space for this tuplet before the end of the measure "
+                                        "(or of the tuplet it would be in). Press Escape to end sticky tuplets.");
+        break;
     }
 
     m_currentDialogError = err;

@@ -93,6 +93,13 @@ NotationNoteInput::NotationNoteInput(const IGetScore* getScore, INotationInterac
         }
 
         cancelPendingTupletIfMoved();
+
+        // moving the input position elsewhere ends sticky tuplet input
+        NoteInputState& is = score()->inputState();
+        if (is.stickyTuplet() && !is.stickyTupletContinues()) {
+            is.setStickyTuplet(std::nullopt);
+            notifyAboutStateChanged();
+        }
     });
 
     // screen readers hear when undo brings a pending tuplet back
@@ -124,6 +131,8 @@ void NotationNoteInput::startNoteInput(NoteInputMethod method, bool focusNotatio
     if (isNoteInputMode()) {
         return;
     }
+
+    m_pausedStickyTuplet.reset();
 
     EngravingItem* el = resolveNoteInputStartPosition();
     if (!el) {
@@ -406,6 +415,9 @@ void NotationNoteInput::endNoteInput(bool resetState)
         return;
     }
 
+    endStickyTuplets();
+    m_pausedStickyTuplet.reset();
+
     InputState& is = score()->inputState();
     is.setNoteEntryMode(false);
     is.setPendingTuplet(std::nullopt);
@@ -460,6 +472,9 @@ void NotationNoteInput::setNoteInputMethod(NoteInputMethod method)
 
     is.setNoteEntryMethod(method);
     is.setPendingTuplet(std::nullopt);
+    if (!is.stickyTupletsAllowed()) {
+        endStickyTuplets();
+    }
     if (shouldSetupInputNote()) {
         setupInputNote();
     }
@@ -518,6 +533,13 @@ void NotationNoteInput::applyNoteValueChange(const muse::TranslatableString& act
 void NotationNoteInput::setDuration(DurationType duration)
 {
     applyNoteValueChange(muse::TranslatableString("undoableAction", "Set duration"), [this, duration](mu::engraving::Transaction& tx) {
+        // with sticky tuplets enabled, a tuplet waiting for this duration becomes the sticky tuplet
+        NoteInputState& is = score()->inputState();
+        if (is.pendingTuplet()) {
+            PendingTuplet pending = *is.pendingTuplet();
+            pending.sticky = configuration()->stickyTupletInput();
+            is.setPendingTuplet(pending);
+        }
         NoteInput::setDuration(tx, score(), duration);
     });
 }
@@ -744,6 +766,11 @@ void NotationNoteInput::setCurrentVoice(voice_idx_t voiceIndex)
 
     inputState.setVoice(voiceIndex);
     cancelPendingTupletIfMoved();
+
+    // a voice change ends sticky tuplet input, even if the run could continue back in the old voice
+    if (inputState.stickyTuplet()) {
+        endStickyTuplets();
+    }
     notifyAboutStateChanged();
 }
 
@@ -780,8 +807,8 @@ void NotationNoteInput::addTuplet(const TupletOptions& options)
     startEdit(TranslatableString("undoableAction", "Add tuplet"));
     score()->expandVoice();
     ChordRest* chordRest = inputState.cr();
+    Tuplet* tuplet = nullptr;
     if (chordRest) {
-        Tuplet* tuplet = nullptr;
         if (durationAsNoteValue) {
             tuplet = score()->addTuplet(chordRest, options.ratio, inputState.duration(), options.numberType, options.bracketType);
         } else {
@@ -796,6 +823,11 @@ void NotationNoteInput::addTuplet(const TupletOptions& options)
             score()->selectNewTuplet(tuplet);
         }
     }
+    if (tuplet && options.startsStickyTuplets) {
+        startStickyTuplet(tuplet);
+    }
+    // turning sticky tuplets on again continues this tuplet, not an earlier run
+    m_pausedStickyTuplet.reset();
     apply();
 
     notifyAboutStateChanged();
@@ -827,6 +859,8 @@ bool NotationNoteInput::setPendingTuplet(const TupletOptions& options)
     pending.bracketType = options.bracketType;
     pending.autoBaseLen = options.autoBaseLen;
     pending.durationAsNoteValue = options.selectedDurationAsNoteValue;
+    // with sticky tuplets enabled, it becomes the sticky tuplet when it is added
+    pending.sticky = configuration()->stickyTupletInput();
     if (is.usingNoteEntryMethod(NoteEntryMethod::BY_NOTE_NAME) || is.usingNoteEntryMethod(NoteEntryMethod::TIMEWISE)) {
         // the input duration sizes it now
         if (!NoteInput::setPendingTuplet(score(), pending)) {
@@ -840,6 +874,7 @@ bool NotationNoteInput::setPendingTuplet(const TupletOptions& options)
     }
 
     m_tupletWasPending = true;
+    m_pausedStickyTuplet.reset();
     accessibilityController()->announce(pendingTupletAnnouncement(*is.pendingTuplet()));
     notifyAboutStateChanged();
     return true;
@@ -884,6 +919,81 @@ void NotationNoteInput::announcePendingTupletChange()
         accessibilityController()->announce(pendingTupletAnnouncement(*score()->inputState().pendingTuplet()));
     }
     m_tupletWasPending = pending;
+}
+
+bool NotationNoteInput::stickyTupletsOn() const
+{
+    return isNoteInputMode() && score()->inputState().stickyTuplet();
+}
+
+// Continues the tuplet at or straight before the input position, if there is one
+void NotationNoteInput::setStickyTuplets(bool on)
+{
+    // a waiting tuplet becomes the sticky tuplet, or not, when it is added
+    if (score()->inputState().pendingTuplet()) {
+        PendingTuplet pending = *score()->inputState().pendingTuplet();
+        pending.sticky = on;
+        score()->inputState().setPendingTuplet(pending);
+    }
+
+    if (!on) {
+        if (score()->inputState().stickyTuplet()) {
+            m_pausedStickyTuplet = score()->inputState().stickyTuplet();
+        }
+        endStickyTuplets();
+        notifyAboutStateChanged();
+        return;
+    }
+
+    const NoteInputState& is = score()->inputState();
+    if (!isNoteInputMode() || !is.stickyTupletsAllowed() || stickyTupletsOn()) {
+        return;
+    }
+
+    if (const Tuplet* tuplet = is.tupletToContinue()) {
+        // a nested run goes on with all its levels, from the innermost note value
+        const StickyTuplet sticky = StickyTuplet::continuing(tuplet, m_pausedStickyTuplet);
+        m_pausedStickyTuplet.reset();
+        score()->inputState().setStickyTuplet(sticky);
+        if (sticky.levels.size() > StickyTuplet::of(tuplet).levels.size()) {
+            score()->inputState().setDuration(sticky.levels.back().baseLen);
+        }
+        notifyAboutStateChanged();
+    } else if (resumeStickyTuplet()) {
+        notifyAboutStateChanged();
+    }
+}
+
+// Elsewhere, the run that turning sticky tuplets off ended goes on from the input position
+bool NotationNoteInput::resumeStickyTuplet()
+{
+    const std::optional<StickyTuplet> paused = m_pausedStickyTuplet;
+    m_pausedStickyTuplet.reset();
+
+    // not where a tuplet waits, nor inside another tuplet
+    NoteInputState& is = score()->inputState();
+    const ChordRest* cr = is.cr();
+    if (!paused || is.pendingTuplet() || (cr && cr->tuplet())) {
+        return false;
+    }
+
+    is.resumeStickyTuplet(*paused);
+    // the first note gets the tuplet's note value, as when a waiting tuplet starts the run
+    is.setDuration(paused->levels.back().baseLen);
+    return true;
+}
+
+void NotationNoteInput::startStickyTuplet(const Tuplet* tuplet)
+{
+    NoteInputState& is = score()->inputState();
+    if (is.stickyTupletsAllowed()) {
+        is.setStickyTuplet(StickyTuplet::of(tuplet));
+    }
+}
+
+void NotationNoteInput::endStickyTuplets()
+{
+    score()->inputState().setStickyTuplet(std::nullopt);
 }
 
 static muse::RectF segmentContentRect(const Segment* segment, track_idx_t track)
