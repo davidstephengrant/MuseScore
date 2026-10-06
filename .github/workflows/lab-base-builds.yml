@@ -2,10 +2,14 @@ name: 'Lab: base builds'
 
 # Keeps development builds of upstream's base branches ready for the test lab.
 # Fork only: pushes lab-* branches here and starts the build workflows on them.
+# Daily: lab-<base> follows each base in BASES. Every 3 hours: for each open
+# upstream PR assigned to or written by the fork's owner, the base commit its
+# CI build was made from is built as lab-<base>-<sha7>, if it isn't yet.
 
 on:
   schedule:
     - cron: '30 4 * * *'
+    - cron: '15 */3 * * *'
   workflow_dispatch:
     inputs:
       sha:
@@ -26,6 +30,8 @@ env:
   UPSTREAM_REPO: musescore/MuseScore
   BUILDS: "Build: Linux|Build: Windows|Build: macOS"
   KEEP_DAYS: 30
+  PR_CRON: '15 */3 * * *'
+  MAX_PR_BUILDS: 4
 
 jobs:
   lab:
@@ -42,6 +48,8 @@ jobs:
           FORK: ${{ github.repository }}
           IN_SHA: ${{ inputs.sha }}
           IN_BASE: ${{ inputs.base || 'main' }}
+          OWNER: ${{ github.repository_owner }}
+          EVENT_SCHEDULE: ${{ github.event.schedule }}
         run: |
           set -euo pipefail
 
@@ -80,15 +88,56 @@ jobs:
             fi
             start_builds "$branch"
           else
-            for base in $BASES; do
-              sha=$(gh api "repos/$UPSTREAM_REPO/branches/$base" --jq .commit.sha)
-              branch="lab-$base"
-              if [ "$(fork_sha "$branch")" = "$sha" ]; then
-                echo "$branch is already at $sha"
+            if [ "$EVENT_SCHEDULE" != "$PR_CRON" ]; then
+              for base in $BASES; do
+                sha=$(gh api "repos/$UPSTREAM_REPO/branches/$base" --jq .commit.sha)
+                branch="lab-$base"
+                if [ "$(fork_sha "$branch")" = "$sha" ]; then
+                  echo "$branch is already at $sha"
+                  continue
+                fi
+                set_branch "$branch" "$sha"
+                start_builds "$branch"
+              done
+            fi
+
+            # The base commit of each open PR assigned to or written by the owner.
+            # A PR's CI build merges it into its base as the base was when the
+            # build started: the base's newest commit before its first build run.
+            started=0
+            for n in $(for q in "assignee:$OWNER" "author:$OWNER"; do
+                         gh api -X GET search/issues -f q="repo:$UPSTREAM_REPO is:pr is:open $q" \
+                           -f per_page=100 --jq '.items[].number'
+                       done | sort -un); do
+              if [ "$started" -ge "$MAX_PR_BUILDS" ]; then
+                echo "Started $MAX_PR_BUILDS PR base builds; the rest wait for the next run"
+                break
+              fi
+              read -r head base < <(gh api "repos/$UPSTREAM_REPO/pulls/$n" --jq '"\(.head.sha) \(.base.ref)"')
+              start=$(gh api "repos/$UPSTREAM_REPO/actions/runs?head_sha=$head&event=pull_request&per_page=100" |
+                jq -r --arg b "$BUILDS" '[.workflow_runs[] | select(.name as $n | $b | split("|") | index($n))
+                                          | .created_at] | min // empty')
+              if [ -z "$start" ]; then
+                echo "#$n: no CI build yet"
                 continue
               fi
-              set_branch "$branch" "$sha"
-              start_builds "$branch"
+              sha=$(gh api "repos/$UPSTREAM_REPO/commits?sha=$base&until=$start&per_page=1" --jq '.[0].sha // empty')
+              [ -n "$sha" ] || continue
+              # The build workflows with no run of that commit here yet (on lab-<base>
+              # or lab-<base>-<sha7>; finished, running or failed all count)
+              missing=$(gh api "repos/$FORK/actions/runs?head_sha=$sha&per_page=50" |
+                jq -r --arg b "$BUILDS" '($b | split("|")) - [.workflow_runs[].name] | join("|")')
+              if [ -z "$missing" ]; then
+                echo "#$n: $base at ${sha:0:7} already built"
+                continue
+              fi
+              branch="lab-$base-${sha:0:7}"
+              echo "#$n: building $base at ${sha:0:7} ($missing)"
+              if [ "$(fork_sha "$branch")" != "$sha" ]; then
+                set_branch "$branch" "$sha"
+              fi
+              BUILDS=$missing start_builds "$branch"
+              started=$((started + 1))
             done
           fi
 
