@@ -25,6 +25,7 @@
 
 #include <optional>
 #include <set>
+#include <vector>
 
 #include "accidental.h"
 #include "chord.h"
@@ -44,6 +45,7 @@ class Segment;
 class Selection;
 class Slur;
 class Staff;
+class Tuplet;
 enum class TupletNumberType : unsigned char;
 enum class TupletBracketType : unsigned char;
 
@@ -86,6 +88,27 @@ struct PendingTuplet {
     Fraction tick;
     track_idx_t track = muse::nidx;
     bool beyondScore = false;
+};
+
+//---------------------------------------------------------
+//   ContinuingTuplet
+//    The tuplet that note input keeps creating while continuing
+//    tuplet input is on, with the tuplets it is nested in
+//---------------------------------------------------------
+
+struct ContinuingTuplet {
+    struct Level {
+        Fraction ratio;
+        TDuration baseLen;
+        TupletNumberType numberType;
+        TupletBracketType bracketType;
+    };
+
+    // from the outermost tuplet to the innermost
+    std::vector<Level> levels;
+
+    static ContinuingTuplet of(const Tuplet* tuplet);
+    bool startsWith(const Tuplet* tuplet) const;
 };
 
 //---------------------------------------------------------
@@ -169,6 +192,12 @@ public:
     void setInsertedTuplet(const Tuplet* tuplet);
     bool inInsertedTuplet(const ChordRest* cr) const;
 
+    const std::optional<ContinuingTuplet>& continuingTuplet() const { return m_continuingTuplet; }
+    void setContinuingTuplet(const std::optional<ContinuingTuplet>& t) { m_continuingTuplet = t; }
+    bool continueTupletsAllowed() const;
+    const Tuplet* tupletToContinue() const;
+    bool continuingTupletGoesOn() const;
+
     void update(Selection& selection);
     void moveInputPos(EngravingItem* e);
     void moveToNextInputPos();
@@ -214,6 +243,7 @@ private:
     std::optional<PendingTuplet> m_pendingTuplet;
     // Insert: where the tuplet that a waiting tuplet inserted starts
     std::optional<std::pair<Fraction, track_idx_t> > m_insertedTuplet;
+    std::optional<ContinuingTuplet> m_continuingTuplet;
 
     // kept through undo and redo: the last number given to a waiting tuplet, and the last one cancelled
     int m_pendingTupletNumber = 0;
