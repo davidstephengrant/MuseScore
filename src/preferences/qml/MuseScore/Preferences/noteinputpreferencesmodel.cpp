@@ -49,6 +49,10 @@ void NoteInputPreferencesModel::load()
         emit tupletsWaitForNextDurationChanged(tupletsWaitForNextDuration());
     });
 
+    notationConfiguration()->stickyTupletsAtStartupChanged().onNotify(this, [this]() {
+        emit stickyTupletsAtStartupChanged(stickyTupletsAtStartup());
+    });
+
     notationConfiguration()->useNoteInputCursorInInputByDurationChanged().onNotify(this, [this]() {
         emit useNoteInputCursorInInputByDurationChanged(useNoteInputCursorInInputByDuration());
     });
@@ -161,6 +165,11 @@ bool NoteInputPreferencesModel::tupletShortcutsUseSelectedDuration() const
 bool NoteInputPreferencesModel::tupletsWaitForNextDuration() const
 {
     return notationConfiguration()->tupletsWaitForNextDuration();
+}
+
+bool NoteInputPreferencesModel::stickyTupletsAtStartup() const
+{
+    return notationConfiguration()->stickyTupletsAtStartup();
 }
 
 bool NoteInputPreferencesModel::useNoteInputCursorInInputByDuration() const
@@ -277,6 +286,15 @@ void NoteInputPreferencesModel::setTupletsWaitForNextDuration(bool value)
     }
 
     notationConfiguration()->setTupletsWaitForNextDuration(value);
+}
+
+void NoteInputPreferencesModel::setStickyTupletsAtStartup(bool value)
+{
+    if (value == stickyTupletsAtStartup()) {
+        return;
+    }
+
+    notationConfiguration()->setStickyTupletsAtStartup(value);
 }
 
 void NoteInputPreferencesModel::setUseNoteInputCursorInInputByDuration(bool value)

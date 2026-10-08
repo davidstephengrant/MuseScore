@@ -48,6 +48,7 @@ PreferencesPage {
             addAccidentalDotsArticulationsToNextNoteEntered: noteInputModel.addAccidentalDotsArticulationsToNextNoteEntered
             tupletShortcutsUseSelectedDuration: noteInputModel.tupletShortcutsUseSelectedDuration
             tupletsWaitForNextDuration: noteInputModel.tupletsWaitForNextDuration
+            stickyTupletsAtStartup: noteInputModel.stickyTupletsAtStartup
             useNoteInputCursorInInputByDuration: noteInputModel.useNoteInputCursorInInputByDuration
 
             navigation.section: root.navigationSection
@@ -67,6 +68,10 @@ PreferencesPage {
 
             onTupletsWaitForNextDurationChangeRequested: function(wait) {
                 noteInputModel.tupletsWaitForNextDuration = wait
+            }
+
+            onStickyTupletsAtStartupChangeRequested: function(sticky) {
+                noteInputModel.stickyTupletsAtStartup = sticky
             }
 
             onUseNoteInputCursorInInputByDurationChangeRequested: function(use) {

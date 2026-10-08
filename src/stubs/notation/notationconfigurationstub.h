@@ -155,6 +155,10 @@ public:
     void setStickyTupletInput(bool sticky) override;
     muse::async::Notification stickyTupletInputChanged() const override;
 
+    bool stickyTupletsAtStartup() const override;
+    void setStickyTupletsAtStartup(bool sticky) override;
+    muse::async::Notification stickyTupletsAtStartupChanged() const override;
+
     muse::io::path_t userMusicFontsPath() const override;
     void setUserMusicFontsPath(const muse::io::path_t& path) override;
     muse::async::Channel<muse::io::path_t> userMusicFontsPathChanged() const override;

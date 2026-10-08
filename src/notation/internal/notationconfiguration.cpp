@@ -78,6 +78,7 @@ static const Settings::Key ADD_ACCIDENTAL_ARTICULATIONS_DOTS_TO_NEXT_NOTE_ENTERE
                                                                                   "score/addAccidentalDotsArticulationsToNextNoteEntered");
 static const Settings::Key TUPLET_SHORTCUTS_USE_SELECTED_DURATION(module_name, "score/tupletShortcutsUseSelectedDuration");
 static const Settings::Key TUPLETS_WAIT_FOR_NEXT_DURATION(module_name, "score/tupletsWaitForNextDuration");
+static const Settings::Key STICKY_TUPLETS_AT_STARTUP(module_name, "score/stickyTupletsAtStartup");
 
 static const Settings::Key IS_MIDI_INPUT_ENABLED(module_name, "io/midi/enableInput");
 static const Settings::Key START_NOTE_INPUT_AT_SELECTED_NOTE_REST_WHEN_PRESSING_MIDI_KEY(module_name,
@@ -282,6 +283,12 @@ void NotationConfiguration::init()
     settings()->valueChanged(TUPLETS_WAIT_FOR_NEXT_DURATION).onReceive(this, [this](const Val&) {
         m_tupletsWaitForNextDurationChanged.notify();
     });
+
+    settings()->setDefaultValue(STICKY_TUPLETS_AT_STARTUP, Val(true));
+    settings()->valueChanged(STICKY_TUPLETS_AT_STARTUP).onReceive(this, [this](const Val&) {
+        m_stickyTupletsAtStartupChanged.notify();
+    });
+    m_stickyTupletInput = stickyTupletsAtStartup();
 
     settings()->setDefaultValue(SELECTION_PROXIMITY, Val(2));
     settings()->valueChanged(SELECTION_PROXIMITY).onReceive(this, [this](const Val& val) {
@@ -904,6 +911,21 @@ void NotationConfiguration::setStickyTupletInput(bool sticky)
 muse::async::Notification NotationConfiguration::stickyTupletInputChanged() const
 {
     return m_stickyTupletInputChanged;
+}
+
+bool NotationConfiguration::stickyTupletsAtStartup() const
+{
+    return settings()->value(STICKY_TUPLETS_AT_STARTUP).toBool();
+}
+
+void NotationConfiguration::setStickyTupletsAtStartup(bool sticky)
+{
+    settings()->setSharedValue(STICKY_TUPLETS_AT_STARTUP, Val(sticky));
+}
+
+muse::async::Notification NotationConfiguration::stickyTupletsAtStartupChanged() const
+{
+    return m_stickyTupletsAtStartupChanged;
 }
 
 bool NotationConfiguration::isMidiInputEnabled() const

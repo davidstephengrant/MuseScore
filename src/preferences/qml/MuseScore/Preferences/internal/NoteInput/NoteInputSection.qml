@@ -38,12 +38,14 @@ BaseSection {
     property bool addAccidentalDotsArticulationsToNextNoteEntered: true
     property bool tupletShortcutsUseSelectedDuration: false
     property bool tupletsWaitForNextDuration: true
+    property bool stickyTupletsAtStartup: true
     property bool useNoteInputCursorInInputByDuration: false
 
     signal defaultNoteInputMethodChangeRequested(int method)
     signal addAccidentalDotsArticulationsToNextNoteEnteredChangeRequested(bool add)
     signal tupletShortcutsUseSelectedDurationChangeRequested(bool use)
     signal tupletsWaitForNextDurationChangeRequested(bool wait)
+    signal stickyTupletsAtStartupChangeRequested(bool sticky)
     signal useNoteInputCursorInInputByDurationChangeRequested(bool use)
 
     ComboBoxWithTitle {
@@ -124,11 +126,32 @@ BaseSection {
     }
 
     ComboBoxWithTitle {
+        title: qsTrc("preferences", "Sticky tuplets when MuseScore Studio launches")
+
+        controlWidth: 300
+
+        navigationName: "StickyTupletsAtStartupDropdown"
+        navigationPanel: root.navigation
+        navigationRow: 4
+
+        model: [
+            { text: qsTrc("preferences", "On"), value: 0 },
+            { text: qsTrc("preferences", "Off"), value: 1 },
+        ]
+
+        currentIndex: root.stickyTupletsAtStartup ? 0 : 1
+
+        onValueEdited: function(newIndex, newValue) {
+            root.stickyTupletsAtStartupChangeRequested(newIndex === 0)
+        }
+    }
+
+    ComboBoxWithTitle {
         title: qsTrc("preferences", "Input by duration mode cursor")
 
         navigationName: "InputByDurationModeCursorDropdown"
         navigationPanel: root.navigation
-        navigationRow: 4
+        navigationRow: 5
 
         model: [
             { text: qsTrc("preferences", "Above staff"), value: 0 },

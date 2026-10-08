@@ -165,6 +165,10 @@ public:
     void setStickyTupletInput(bool sticky) override;
     muse::async::Notification stickyTupletInputChanged() const override;
 
+    bool stickyTupletsAtStartup() const override;
+    void setStickyTupletsAtStartup(bool sticky) override;
+    muse::async::Notification stickyTupletsAtStartupChanged() const override;
+
     muse::io::path_t userMusicFontsPath() const override;
     void setUserMusicFontsPath(const muse::io::path_t& path) override;
     muse::async::Channel<muse::io::path_t> userMusicFontsPathChanged() const override;
@@ -269,6 +273,7 @@ private:
     muse::async::Notification m_tupletShortcutsUseSelectedDurationChanged;
     muse::async::Notification m_tupletsWaitForNextDurationChanged;
     muse::async::Notification m_stickyTupletInputChanged;
+    muse::async::Notification m_stickyTupletsAtStartupChanged;
     muse::async::Notification m_useNoteInputCursorInInputByDurationChanged;
     muse::async::Notification m_isMidiInputEnabledChanged;
     muse::async::Notification m_startNoteInputAtSelectedNoteRestWhenPressingMidiKeyChanged;
