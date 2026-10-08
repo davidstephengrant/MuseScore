@@ -93,6 +93,7 @@ public:
     static void addFret(Transaction& tx, Score* score, int fret);
 
     static void setDuration(Transaction& tx, Score* score, DurationType duration);
+    static bool canAddPendingTuplet(const Score* score, DurationType duration);
     static void toggleRest(Transaction& tx, Score* score);
     static void toggleDots(Transaction& tx, Score* score, int dots, bool toggleForSelectionOnly = false);
     static void increaseDuration(Transaction& tx, Score* score);
