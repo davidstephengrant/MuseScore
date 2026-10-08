@@ -1384,6 +1384,152 @@ static bool durationTooShortForDots(const TDuration& duration, int dots)
 }
 
 //---------------------------------------------------------
+//   inputDurationAfter
+//    The input duration after setDuration(): in By duration
+//    and Rhythm input, it keeps the dots of the old one
+//---------------------------------------------------------
+
+static TDuration inputDurationAfter(const Score* score, DurationType duration)
+{
+    TDuration result(duration);
+    const InputState& is = score->inputState();
+    const int dots = is.duration().dots();
+    if (dots > 0 && (is.usingNoteEntryMethod(NoteEntryMethod::BY_DURATION) || is.usingNoteEntryMethod(NoteEntryMethod::RHYTHM))
+        && !durationTooShortForDots(result, dots)) {
+        result.setDots(dots);
+    }
+    return result;
+}
+
+//---------------------------------------------------------
+//   drumInOtherVoice
+//    Whether the next note is a drum that goes into another
+//    voice than the input position's
+//---------------------------------------------------------
+
+static bool drumInOtherVoice(const InputState& is)
+{
+    if (is.rest() || !is.drumset() || is.notes().empty()) {
+        return false;
+    }
+    const int pitch = is.notes().front().pitch;
+    return is.drumset()->isValid(pitch) && static_cast<voice_idx_t>(is.drumset()->voice(pitch)) != is.voice();
+}
+
+//---------------------------------------------------------
+//   pendingTupletShape
+//    The ratio and note value of the pending tuplet when
+//    `duration` sizes it: `duration` is its note value, or
+//    its length divided
+//---------------------------------------------------------
+
+static bool pendingTupletShape(const PendingTuplet& pending, const TDuration& duration, Fraction& ratio, TDuration& baseLen)
+{
+    ratio = pending.ratio;
+    if (pending.durationAsNoteValue) {
+        baseLen = duration;
+        return true;
+    }
+
+    if (pending.autoBaseLen) {
+        ratio.setDenominator(Tuplet::computeTupletDenominator(ratio.numerator(), duration.fraction()));
+    }
+    if (ratio.denominator() <= 0) {
+        return false;
+    }
+    const Fraction noteValue = duration.fraction() / ratio.denominator();
+    if (!TDuration::isValid(noteValue)) {
+        return false;
+    }
+    baseLen = TDuration(noteValue);
+    return baseLen.isValid() && baseLen >= TDuration(DurationType::V_1024TH);
+}
+
+//---------------------------------------------------------
+//   pendingTupletFits
+//    Whether the tuplet waiting at the input position fits
+//    there when `duration` sizes it
+//---------------------------------------------------------
+
+static bool pendingTupletFits(const Score* score, const TDuration& duration)
+{
+    const InputState& is = score->inputState();
+    Fraction ratio;
+    TDuration baseLen;
+    if (!pendingTupletShape(*is.pendingTuplet(), duration, ratio, baseLen)) {
+        return false;
+    }
+
+    if (is.beyondScore()) {
+        // a new measure like the last one
+        const Measure* last = score->lastMeasure();
+        return last && baseLen.fraction() * ratio.denominator() <= last->ticks();
+    }
+
+    // at a chord or rest, in an empty voice, or in a longer chord or rest that addPendingTuplet shortens
+    return score->canAddTuplet(is.segment(), is.track(), ratio, baseLen);
+}
+
+bool NoteInput::canAddPendingTuplet(const Score* score, DurationType duration)
+{
+    // a drum in another voice cancels it instead
+    const InputState& is = score->inputState();
+    return !is.pendingTupletHere() || drumInOtherVoice(is) || pendingTupletFits(score, inputDurationAfter(score, duration));
+}
+
+//---------------------------------------------------------
+//   addPendingTuplet
+//    Create the tuplet waiting at the input position, sized
+//    by the input duration, and make its note value the input
+//    duration
+//---------------------------------------------------------
+
+static bool addPendingTuplet(Transaction& tx, Score* score)
+{
+    InputState& is = score->inputState();
+    if (!is.pendingTupletHere()) {
+        is.setPendingTuplet(std::nullopt);
+        return true;
+    }
+
+    const PendingTuplet pending = *is.pendingTuplet();
+    Fraction ratio;
+    TDuration baseLen;
+    if (!pendingTupletShape(pending, is.duration(), ratio, baseLen) || !pendingTupletFits(score, is.duration())) {
+        return false;
+    }
+
+    if (is.beyondScore()) {
+        score->appendMeasures(1);
+        is.moveToNextInputPos();
+    }
+    score->expandVoice();
+    // like addPitch: shorten a longer chord or rest that starts earlier
+    if (!is.cr()) {
+        ChordRest* prevCr = is.segment()->nextChordRest(is.track(), /*backwards*/ true, /*stopAtMeasureBoundary*/ true);
+        if (prevCr && prevCr->endTick() > is.tick()) {
+            const InputState inputStateToRestore = is; // because truncateChordRest will alter the input state
+            NoteInput::truncateChordRest(tx, score, prevCr, is.tick(), /*fillWithRest*/ true);
+            is = inputStateToRestore;
+        }
+    }
+    ChordRest* cr = is.cr();
+    // addTuplet would show a warning if it can't add the tuplet
+    Tuplet* tuplet = cr && score->canAddTuplet(cr, ratio, baseLen)
+                     ? score->addTuplet(cr, ratio, baseLen, pending.numberType, pending.bracketType) : nullptr;
+    if (!tuplet || tuplet->elements().empty()) {
+        return false;
+    }
+
+    // addTuplet can reselect the selection, which moves the input position to its voice
+    is.setTrack(tuplet->track());
+    is.setPendingTuplet(std::nullopt);
+    is.setSegment(toChordRest(tuplet->elements().front())->segment());
+    is.setDuration(baseLen);
+    return true;
+}
+
+//---------------------------------------------------------
 //   setDuration
 //    Set the note input duration (and apply it to the selection).
 //---------------------------------------------------------
@@ -1411,6 +1557,18 @@ void NoteInput::setDuration(Transaction& tx, Score* score, DurationType duration
             // Preserve the number of dots from the previous duration
             if (oldDuration.dots() > 0) {
                 toggleDots(tx, score, oldDuration.dots());
+            }
+
+            // a drum in another voice cancels a tuplet waiting here, as a voice change does
+            if (drumInOtherVoice(is)) {
+                is.setPendingTuplet(std::nullopt);
+            }
+
+            // a tuplet waiting for this duration takes the note or rest; if it can't, nothing is entered
+            if (is.pendingTuplet() && !addPendingTuplet(tx, score)) {
+                MScore::setError(MsError::NO_SPACE_FOR_TUPLET);
+                is.setDuration(oldDuration);
+                return;
             }
 
             if (is.rest()) {
@@ -1539,6 +1697,7 @@ void NoteInput::applyToSelection(Score* score, const TDuration& oldDuration, boo
                                  AccidentalType oldAccidentalType, bool toggleForSelectionOnly, bool restToggle)
 {
     InputState& is = score->inputState();
+    const bool pendingTupletHere = is.pendingTupletHere();
 
     if (score->noteEntryMode()) {
         if (!toggleForSelectionOnly || score->selection().isNone()) {
@@ -1661,6 +1820,10 @@ void NoteInput::applyToSelection(Score* score, const TDuration& oldDuration, boo
         if (score->noteEntryMode()) {
             if (is.lastSegment() == is.segment()) {
                 is.moveToNextInputPos();
+            }
+            // a pending tuplet follows the input position when the previous note changes length
+            if (pendingTupletHere) {
+                is.movePendingTupletHere();
             }
         }
     }
