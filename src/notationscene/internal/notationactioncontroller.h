@@ -153,7 +153,7 @@ private:
     void toggleArticulation(SymbolId articulationSymbolId);
 
     muse::Ret putTuplet(const muse::rcommand::Params& params);
-    void putTuplet(const TupletOptions& options);
+    void putTuplet(const TupletOptions& options, bool canWait = true);
     void putTuplet(int tupletCount);
 
     muse::Ret moveWithRet(MoveDirection direction, bool quickly = false);

@@ -819,6 +819,14 @@ void NotationActionController::resetState()
     }
 
     if (noteInput->isNoteInputMode()) {
+        noteInput->forgetPendingTuplets();
+
+        // the first Escape cancels a pending tuplet, the next one ends note input
+        if (noteInput->tupletPending()) {
+            noteInput->cancelPendingTuplet();
+            return;
+        }
+
         noteInput->endNoteInput();
         return;
     }
@@ -1503,11 +1511,12 @@ muse::Ret NotationActionController::putTuplet(const muse::rcommand::Params& para
     options.autoBaseLen = params.at("auto-baselen", Val(false)).toBool();
     options.selectedDurationAsNoteValue = params.at("selected-duration-as-note-value", Val(false)).toBool();
 
-    putTuplet(options);
+    // the tuplet dialog's tuplet is added straight away
+    putTuplet(options, /*canWait*/ false);
     return muse::make_ok();
 }
 
-void NotationActionController::putTuplet(const TupletOptions& options)
+void NotationActionController::putTuplet(const TupletOptions& options, bool canWait)
 {
     TRACEFUNC;
     auto interaction = currentNotationInteraction();
@@ -1517,6 +1526,13 @@ void NotationActionController::putTuplet(const TupletOptions& options)
 
     auto noteInput = interaction->noteInput();
     if (!noteInput) {
+        return;
+    }
+
+    // in By duration and Rhythm input, the next duration sizes the tuplet
+    if (canWait && noteInput->isNoteInputMode()
+        && (noteInput->usingNoteInputMethod(NoteInputMethod::BY_DURATION) || noteInput->usingNoteInputMethod(NoteInputMethod::RHYTHM))) {
+        noteInput->setPendingTuplet(options);
         return;
     }
 
