@@ -45,6 +45,10 @@ void NoteInputPreferencesModel::load()
         emit tupletCommandsSelectedDurationAsChanged(tupletCommandsSelectedDurationAs());
     });
 
+    notationConfiguration()->continueTupletsAtStartupChanged().onNotify(this, [this]() {
+        emit continueTupletsAtStartupChanged(continueTupletsAtStartup());
+    });
+
     notationConfiguration()->useNoteInputCursorInInputByDurationChanged().onNotify(this, [this]() {
         emit useNoteInputCursorInInputByDurationChanged(useNoteInputCursorInInputByDuration());
     });
@@ -164,6 +168,11 @@ int NoteInputPreferencesModel::tupletCommandsSelectedDurationAs() const
     return static_cast<int>(notationConfiguration()->tupletCommandsSelectedDurationAs());
 }
 
+bool NoteInputPreferencesModel::continueTupletsAtStartup() const
+{
+    return notationConfiguration()->continueTupletsAtStartup();
+}
+
 bool NoteInputPreferencesModel::useNoteInputCursorInInputByDuration() const
 {
     return notationConfiguration()->useNoteInputCursorInInputByDuration();
@@ -269,6 +278,15 @@ void NoteInputPreferencesModel::setTupletCommandsSelectedDurationAs(int value)
     }
 
     notationConfiguration()->setTupletCommandsSelectedDurationAs(static_cast<mu::engraving::TupletSelectedDuration>(value));
+}
+
+void NoteInputPreferencesModel::setContinueTupletsAtStartup(bool value)
+{
+    if (value == continueTupletsAtStartup()) {
+        return;
+    }
+
+    notationConfiguration()->setContinueTupletsAtStartup(value);
 }
 
 void NoteInputPreferencesModel::setUseNoteInputCursorInInputByDuration(bool value)

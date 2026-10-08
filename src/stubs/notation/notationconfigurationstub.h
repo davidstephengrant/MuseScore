@@ -151,6 +151,10 @@ public:
     void setContinuingTupletInput(bool continuing) override;
     muse::async::Notification continuingTupletInputChanged() const override;
 
+    bool continueTupletsAtStartup() const override;
+    void setContinueTupletsAtStartup(bool continuing) override;
+    muse::async::Notification continueTupletsAtStartupChanged() const override;
+
     muse::io::path_t userMusicFontsPath() const override;
     void setUserMusicFontsPath(const muse::io::path_t& path) override;
     muse::async::Channel<muse::io::path_t> userMusicFontsPathChanged() const override;

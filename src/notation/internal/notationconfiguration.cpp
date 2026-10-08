@@ -77,6 +77,7 @@ static const Settings::Key DEFAULT_NOTE_INPUT_METHOD(module_name, "score/default
 static const Settings::Key ADD_ACCIDENTAL_ARTICULATIONS_DOTS_TO_NEXT_NOTE_ENTERED(module_name,
                                                                                   "score/addAccidentalDotsArticulationsToNextNoteEntered");
 static const Settings::Key TUPLET_COMMANDS_SELECTED_DURATION_AS(module_name, "score/tupletCommandsSelectedDurationAs");
+static const Settings::Key CONTINUE_TUPLETS_AT_STARTUP(module_name, "score/continueTupletsAtStartup");
 
 static const Settings::Key IS_MIDI_INPUT_ENABLED(module_name, "io/midi/enableInput");
 static const Settings::Key START_NOTE_INPUT_AT_SELECTED_NOTE_REST_WHEN_PRESSING_MIDI_KEY(module_name,
@@ -276,6 +277,12 @@ void NotationConfiguration::init()
     settings()->valueChanged(TUPLET_COMMANDS_SELECTED_DURATION_AS).onReceive(this, [this](const Val&) {
         m_tupletCommandsSelectedDurationAsChanged.notify();
     });
+
+    settings()->setDefaultValue(CONTINUE_TUPLETS_AT_STARTUP, Val(true));
+    settings()->valueChanged(CONTINUE_TUPLETS_AT_STARTUP).onReceive(this, [this](const Val&) {
+        m_continueTupletsAtStartupChanged.notify();
+    });
+    m_continuingTupletInput = continueTupletsAtStartup();
 
     settings()->setDefaultValue(SELECTION_PROXIMITY, Val(2));
     settings()->valueChanged(SELECTION_PROXIMITY).onReceive(this, [this](const Val& val) {
@@ -883,6 +890,21 @@ void NotationConfiguration::setContinuingTupletInput(bool continuing)
 muse::async::Notification NotationConfiguration::continuingTupletInputChanged() const
 {
     return m_continuingTupletInputChanged;
+}
+
+bool NotationConfiguration::continueTupletsAtStartup() const
+{
+    return settings()->value(CONTINUE_TUPLETS_AT_STARTUP).toBool();
+}
+
+void NotationConfiguration::setContinueTupletsAtStartup(bool continuing)
+{
+    settings()->setSharedValue(CONTINUE_TUPLETS_AT_STARTUP, Val(continuing));
+}
+
+muse::async::Notification NotationConfiguration::continueTupletsAtStartupChanged() const
+{
+    return m_continueTupletsAtStartupChanged;
 }
 
 bool NotationConfiguration::isMidiInputEnabled() const

@@ -47,6 +47,8 @@ class NoteInputPreferencesModel : public QObject, public muse::Contextable, publ
     Q_PROPERTY(
         int tupletCommandsSelectedDurationAs READ tupletCommandsSelectedDurationAs WRITE setTupletCommandsSelectedDurationAs NOTIFY tupletCommandsSelectedDurationAsChanged)
     Q_PROPERTY(
+        bool continueTupletsAtStartup READ continueTupletsAtStartup WRITE setContinueTupletsAtStartup NOTIFY continueTupletsAtStartupChanged)
+    Q_PROPERTY(
         bool useNoteInputCursorInInputByDuration READ useNoteInputCursorInInputByDuration WRITE setUseNoteInputCursorInInputByDuration NOTIFY useNoteInputCursorInInputByDurationChanged)
 
     Q_PROPERTY(bool midiInputEnabled READ midiInputEnabled WRITE setMidiInputEnabled NOTIFY midiInputEnabledChanged)
@@ -98,6 +100,7 @@ public:
     int defaultNoteInputMethod() const;
     bool addAccidentalDotsArticulationsToNextNoteEntered() const;
     int tupletCommandsSelectedDurationAs() const;
+    bool continueTupletsAtStartup() const;
     bool useNoteInputCursorInInputByDuration() const;
 
     bool midiInputEnabled() const;
@@ -125,6 +128,7 @@ public slots:
     void setDefaultNoteInputMethod(int value);
     void setAddAccidentalDotsArticulationsToNextNoteEntered(bool value);
     void setTupletCommandsSelectedDurationAs(int value);
+    void setContinueTupletsAtStartup(bool value);
     void setUseNoteInputCursorInInputByDuration(bool value);
 
     void setMidiInputEnabled(bool value);
@@ -152,6 +156,7 @@ signals:
     void defaultNoteInputMethodChanged(int value);
     void addAccidentalDotsArticulationsToNextNoteEnteredChanged(bool value);
     void tupletCommandsSelectedDurationAsChanged(int value);
+    void continueTupletsAtStartupChanged(bool value);
     void useNoteInputCursorInInputByDurationChanged(bool value);
 
     void midiInputEnabledChanged(bool value);

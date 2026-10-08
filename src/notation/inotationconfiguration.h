@@ -159,10 +159,14 @@ public:
     virtual muse::async::Notification tupletCommandsSelectedDurationAsChanged() const = 0;
 
     // continuing tuplets: a tuplet added during note input, or note input in a tuplet, starts continuing tuplet input;
-    // kept for the session only, so it's off at each launch
+    // kept for the session only, and set from continueTupletsAtStartup() at each launch
     virtual bool continuingTupletInput() const = 0;
     virtual void setContinuingTupletInput(bool continuing) = 0;
     virtual muse::async::Notification continuingTupletInputChanged() const = 0;
+
+    virtual bool continueTupletsAtStartup() const = 0;
+    virtual void setContinueTupletsAtStartup(bool continuing) = 0;
+    virtual muse::async::Notification continueTupletsAtStartupChanged() const = 0;
 
     virtual muse::io::path_t userMusicFontsPath() const = 0;
     virtual void setUserMusicFontsPath(const muse::io::path_t& path) = 0;
