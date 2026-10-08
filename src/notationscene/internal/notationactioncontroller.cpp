@@ -1186,6 +1186,12 @@ int NotationActionController::currentDotCount() const
     return interaction->noteInput()->state().duration().dots();
 }
 
+bool NotationActionController::tupletPending() const
+{
+    INotationNoteInputPtr noteInput = currentNotationNoteInput();
+    return noteInput && noteInput->tupletPending();
+}
+
 bool NotationActionController::currentIsRest() const
 {
     INotationInteractionPtr interaction = currentNotationInteraction();
