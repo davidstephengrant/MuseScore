@@ -112,6 +112,7 @@ private:
     bool shouldSetupInputNote() const;
 
     void cancelPendingTupletIfMoved();
+    void announcePendingTupletChange();
     void setupInputNote();
 
     NoteVal noteValForLine(int line) const;
@@ -135,6 +136,9 @@ private:
     muse::async::Notification m_noteInputEnded;
 
     std::function<muse::RectF()> m_getViewRectFunc;
+
+    // a tuplet was pending at the last state change
+    bool m_tupletWasPending = false;
 };
 }
 

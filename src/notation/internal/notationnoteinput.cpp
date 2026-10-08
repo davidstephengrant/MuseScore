@@ -94,6 +94,16 @@ NotationNoteInput::NotationNoteInput(const IGetScore* getScore, INotationInterac
 
         cancelPendingTupletIfMoved();
     });
+
+    // screen readers hear when undo brings a pending tuplet back
+    m_stateChanged.onNotify(this, [this]() {
+        announcePendingTupletChange();
+    });
+    if (m_undoStack) {
+        m_undoStack->stackChanged().onNotify(this, [this]() {
+            announcePendingTupletChange();
+        });
+    }
 }
 
 bool NotationNoteInput::isNoteInputMode() const
@@ -791,6 +801,12 @@ void NotationNoteInput::addTuplet(const TupletOptions& options)
     notifyAboutStateChanged();
 }
 
+static String pendingTupletAnnouncement(const PendingTuplet& pending)
+{
+    //: %1 is a tuplet type, e.g. "Triplet"
+    return muse::mtrc("notation", "%1 waiting for a duration").arg(Tuplet::typeUserName(pending.ratio.numerator()));
+}
+
 bool NotationNoteInput::tupletPending() const
 {
     return isNoteInputMode() && score()->inputState().pendingTupletHere();
@@ -811,12 +827,24 @@ void NotationNoteInput::setPendingTuplet(const TupletOptions& options)
     pending.beyondScore = is.beyondScore();
     is.setPendingTuplet(pending);
 
+    m_tupletWasPending = true;
+    accessibilityController()->announce(pendingTupletAnnouncement(pending));
     notifyAboutStateChanged();
 }
 
 void NotationNoteInput::cancelPendingTuplet()
 {
-    score()->inputState().setPendingTuplet(std::nullopt);
+    NoteInputState& is = score()->inputState();
+    if (!is.pendingTuplet()) {
+        return;
+    }
+
+    const String type = Tuplet::typeUserName(is.pendingTuplet()->ratio.numerator());
+    is.setPendingTuplet(std::nullopt);
+
+    m_tupletWasPending = false;
+    //: %1 is a tuplet type, e.g. "Triplet"
+    accessibilityController()->announce(muse::mtrc("notation", "%1 cancelled").arg(type));
     notifyAboutStateChanged();
 }
 
@@ -831,8 +859,18 @@ void NotationNoteInput::cancelPendingTupletIfMoved()
     NoteInputState& is = score()->inputState();
     if (is.pendingTuplet() && !is.pendingTupletHere()) {
         is.setPendingTuplet(std::nullopt);
+        m_tupletWasPending = false; // the readout of the new position is enough
         notifyAboutStateChanged();
     }
+}
+
+void NotationNoteInput::announcePendingTupletChange()
+{
+    const bool pending = tupletPending();
+    if (pending && !m_tupletWasPending) {
+        accessibilityController()->announce(pendingTupletAnnouncement(*score()->inputState().pendingTuplet()));
+    }
+    m_tupletWasPending = pending;
 }
 
 static muse::RectF segmentContentRect(const Segment* segment, track_idx_t track)
