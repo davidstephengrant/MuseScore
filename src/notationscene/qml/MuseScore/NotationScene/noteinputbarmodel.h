@@ -86,6 +86,7 @@ private:
 
     muse::uicomponents::MenuItemList makeCrossStaffBeamingItems();
     muse::uicomponents::MenuItemList makeTupletItems();
+    void updateTupletItemChecked();
     muse::uicomponents::MenuItemList makeAddItems();
     muse::uicomponents::MenuItemList makeNotesItems();
     muse::uicomponents::MenuItemList makeIntervalsItems();
@@ -94,5 +95,7 @@ private:
     muse::uicomponents::MenuItemList makeTextItems();
     muse::uicomponents::MenuItemList makeLinesItems();
     muse::uicomponents::MenuItemList makeChordAndFretboardDiagramsItems();
+
+    muse::uicomponents::MenuItem* m_tupletItem = nullptr;
 };
 }
