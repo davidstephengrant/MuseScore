@@ -77,6 +77,7 @@ static const Settings::Key DEFAULT_NOTE_INPUT_METHOD(module_name, "score/default
 static const Settings::Key ADD_ACCIDENTAL_ARTICULATIONS_DOTS_TO_NEXT_NOTE_ENTERED(module_name,
                                                                                   "score/addAccidentalDotsArticulationsToNextNoteEntered");
 static const Settings::Key TUPLET_SHORTCUTS_USE_SELECTED_DURATION(module_name, "score/tupletShortcutsUseSelectedDuration");
+static const Settings::Key TUPLETS_WAIT_FOR_NEXT_DURATION(module_name, "score/tupletsWaitForNextDuration");
 
 static const Settings::Key IS_MIDI_INPUT_ENABLED(module_name, "io/midi/enableInput");
 static const Settings::Key START_NOTE_INPUT_AT_SELECTED_NOTE_REST_WHEN_PRESSING_MIDI_KEY(module_name,
@@ -275,6 +276,11 @@ void NotationConfiguration::init()
     settings()->setDefaultValue(TUPLET_SHORTCUTS_USE_SELECTED_DURATION, Val(true));
     settings()->valueChanged(TUPLET_SHORTCUTS_USE_SELECTED_DURATION).onReceive(this, [this](const Val&) {
         m_tupletShortcutsUseSelectedDurationChanged.notify();
+    });
+
+    settings()->setDefaultValue(TUPLETS_WAIT_FOR_NEXT_DURATION, Val(true));
+    settings()->valueChanged(TUPLETS_WAIT_FOR_NEXT_DURATION).onReceive(this, [this](const Val&) {
+        m_tupletsWaitForNextDurationChanged.notify();
     });
 
     settings()->setDefaultValue(SELECTION_PROXIMITY, Val(2));
@@ -863,6 +869,21 @@ void NotationConfiguration::setTupletShortcutsUseSelectedDuration(bool use)
 muse::async::Notification NotationConfiguration::tupletShortcutsUseSelectedDurationChanged() const
 {
     return m_tupletShortcutsUseSelectedDurationChanged;
+}
+
+bool NotationConfiguration::tupletsWaitForNextDuration() const
+{
+    return settings()->value(TUPLETS_WAIT_FOR_NEXT_DURATION).toBool();
+}
+
+void NotationConfiguration::setTupletsWaitForNextDuration(bool wait)
+{
+    settings()->setSharedValue(TUPLETS_WAIT_FOR_NEXT_DURATION, Val(wait));
+}
+
+muse::async::Notification NotationConfiguration::tupletsWaitForNextDurationChanged() const
+{
+    return m_tupletsWaitForNextDurationChanged;
 }
 
 bool NotationConfiguration::isMidiInputEnabled() const

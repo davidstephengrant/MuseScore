@@ -157,6 +157,10 @@ public:
     void setTupletShortcutsUseSelectedDuration(bool use) override;
     muse::async::Notification tupletShortcutsUseSelectedDurationChanged() const override;
 
+    bool tupletsWaitForNextDuration() const override;
+    void setTupletsWaitForNextDuration(bool wait) override;
+    muse::async::Notification tupletsWaitForNextDurationChanged() const override;
+
     muse::io::path_t userMusicFontsPath() const override;
     void setUserMusicFontsPath(const muse::io::path_t& path) override;
     muse::async::Channel<muse::io::path_t> userMusicFontsPathChanged() const override;
@@ -259,6 +263,7 @@ private:
     muse::async::Notification m_defaultNoteInputMethodChanged;
     muse::async::Notification m_addAccidentalDotsArticulationsToNextNoteEnteredChanged;
     muse::async::Notification m_tupletShortcutsUseSelectedDurationChanged;
+    muse::async::Notification m_tupletsWaitForNextDurationChanged;
     muse::async::Notification m_useNoteInputCursorInInputByDurationChanged;
     muse::async::Notification m_isMidiInputEnabledChanged;
     muse::async::Notification m_startNoteInputAtSelectedNoteRestWhenPressingMidiKeyChanged;

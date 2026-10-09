@@ -1536,7 +1536,7 @@ void NotationActionController::putTuplet(const TupletOptions& options, bool canW
     }
 
     // in By duration and Rhythm input, the next duration sizes the tuplet
-    if (canWait && noteInput->isNoteInputMode()
+    if (canWait && configuration()->tupletsWaitForNextDuration() && noteInput->isNoteInputMode()
         && (noteInput->usingNoteInputMethod(NoteInputMethod::BY_DURATION) || noteInput->usingNoteInputMethod(NoteInputMethod::RHYTHM))) {
         noteInput->setPendingTuplet(options);
         return;

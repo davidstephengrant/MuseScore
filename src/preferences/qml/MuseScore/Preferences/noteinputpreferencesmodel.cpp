@@ -45,6 +45,10 @@ void NoteInputPreferencesModel::load()
         emit tupletShortcutsUseSelectedDurationChanged(tupletShortcutsUseSelectedDuration());
     });
 
+    notationConfiguration()->tupletsWaitForNextDurationChanged().onNotify(this, [this]() {
+        emit tupletsWaitForNextDurationChanged(tupletsWaitForNextDuration());
+    });
+
     notationConfiguration()->useNoteInputCursorInInputByDurationChanged().onNotify(this, [this]() {
         emit useNoteInputCursorInInputByDurationChanged(useNoteInputCursorInInputByDuration());
     });
@@ -154,6 +158,11 @@ bool NoteInputPreferencesModel::tupletShortcutsUseSelectedDuration() const
     return notationConfiguration()->tupletShortcutsUseSelectedDuration();
 }
 
+bool NoteInputPreferencesModel::tupletsWaitForNextDuration() const
+{
+    return notationConfiguration()->tupletsWaitForNextDuration();
+}
+
 bool NoteInputPreferencesModel::useNoteInputCursorInInputByDuration() const
 {
     return notationConfiguration()->useNoteInputCursorInInputByDuration();
@@ -259,6 +268,15 @@ void NoteInputPreferencesModel::setTupletShortcutsUseSelectedDuration(bool value
     }
 
     notationConfiguration()->setTupletShortcutsUseSelectedDuration(value);
+}
+
+void NoteInputPreferencesModel::setTupletsWaitForNextDuration(bool value)
+{
+    if (value == tupletsWaitForNextDuration()) {
+        return;
+    }
+
+    notationConfiguration()->setTupletsWaitForNextDuration(value);
 }
 
 void NoteInputPreferencesModel::setUseNoteInputCursorInInputByDuration(bool value)

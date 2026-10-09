@@ -37,11 +37,13 @@ BaseSection {
 
     property bool addAccidentalDotsArticulationsToNextNoteEntered: true
     property bool tupletShortcutsUseSelectedDuration: false
+    property bool tupletsWaitForNextDuration: true
     property bool useNoteInputCursorInInputByDuration: false
 
     signal defaultNoteInputMethodChangeRequested(int method)
     signal addAccidentalDotsArticulationsToNextNoteEnteredChangeRequested(bool add)
     signal tupletShortcutsUseSelectedDurationChangeRequested(bool use)
+    signal tupletsWaitForNextDurationChangeRequested(bool wait)
     signal useNoteInputCursorInInputByDurationChangeRequested(bool use)
 
     ComboBoxWithTitle {
@@ -101,11 +103,32 @@ BaseSection {
     }
 
     ComboBoxWithTitle {
+        title: qsTrc("preferences", "Tuplets in Input by duration mode")
+
+        controlWidth: 300
+
+        navigationName: "TupletsWaitForNextDurationDropdown"
+        navigationPanel: root.navigation
+        navigationRow: 3
+
+        model: [
+            { text: qsTrc("preferences", "Wait for the next duration"), value: 0 },
+            { text: qsTrc("preferences", "Use the selected duration"), value: 1 },
+        ]
+
+        currentIndex: root.tupletsWaitForNextDuration ? 0 : 1
+
+        onValueEdited: function(newIndex, newValue) {
+            root.tupletsWaitForNextDurationChangeRequested(newIndex === 0)
+        }
+    }
+
+    ComboBoxWithTitle {
         title: qsTrc("preferences", "Input by duration mode cursor")
 
         navigationName: "InputByDurationModeCursorDropdown"
         navigationPanel: root.navigation
-        navigationRow: 3
+        navigationRow: 4
 
         model: [
             { text: qsTrc("preferences", "Above staff"), value: 0 },
