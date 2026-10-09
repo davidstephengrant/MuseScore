@@ -2,14 +2,16 @@ name: 'Lab: base builds'
 
 # Keeps development builds of upstream's base branches ready for the test lab.
 # Fork only: pushes lab-* branches here and starts the build workflows on them.
-# Daily: lab-<base> follows each base in BASES. Every 3 hours: for each open
-# upstream PR assigned to or written by the fork's owner, the base commit its
-# CI build was made from is built as lab-<base>-<sha7>, if it isn't yet.
+# Hourly, at an odd minute (GitHub drops many runs at busy times like :00, :15
+# and :30): for each open upstream PR assigned to or written by the fork's
+# owner, the base commit its CI build was made from is built as
+# lab-<base>-<sha7>, if it isn't yet; and lab-<base> follows each base in BASES
+# once its last build is over SYNC_HOURS old, so a dropped run is caught up an
+# hour later. A run with nothing to do takes seconds.
 
 on:
   schedule:
-    - cron: '30 4 * * *'
-    - cron: '15 */3 * * *'
+    - cron: '37 * * * *'
   workflow_dispatch:
     inputs:
       sha:
@@ -30,7 +32,7 @@ env:
   UPSTREAM_REPO: musescore/MuseScore
   BUILDS: "Build: Linux|Build: Windows|Build: macOS"
   KEEP_DAYS: 30
-  PR_CRON: '15 */3 * * *'
+  SYNC_HOURS: 20
   MAX_PR_BUILDS: 4
 
 jobs:
@@ -49,7 +51,7 @@ jobs:
           IN_SHA: ${{ inputs.sha }}
           IN_BASE: ${{ inputs.base || 'main' }}
           OWNER: ${{ github.repository_owner }}
-          EVENT_SCHEDULE: ${{ github.event.schedule }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
           set -euo pipefail
 
@@ -88,18 +90,25 @@ jobs:
             fi
             start_builds "$branch"
           else
-            if [ "$EVENT_SCHEDULE" != "$PR_CRON" ]; then
-              for base in $BASES; do
-                sha=$(gh api "repos/$UPSTREAM_REPO/branches/$base" --jq .commit.sha)
-                branch="lab-$base"
-                if [ "$(fork_sha "$branch")" = "$sha" ]; then
-                  echo "$branch is already at $sha"
-                  continue
-                fi
-                set_branch "$branch" "$sha"
-                start_builds "$branch"
-              done
-            fi
+            # Sync the bases about once a day; a run by hand always syncs
+            sync_cutoff=$(date -u -d "$SYNC_HOURS hours ago" +%s)
+            for base in $BASES; do
+              last=$(gh api "repos/$FORK/actions/runs?branch=lab-$base&per_page=1" \
+                --jq '.workflow_runs[0].created_at // empty')
+              if [ "$EVENT_NAME" != workflow_dispatch ] && [ -n "$last" ] &&
+                 [ "$(date -u -d "$last" +%s)" -ge "$sync_cutoff" ]; then
+                echo "lab-$base was last built at $last; next sync after $SYNC_HOURS hours"
+                continue
+              fi
+              sha=$(gh api "repos/$UPSTREAM_REPO/branches/$base" --jq .commit.sha)
+              branch="lab-$base"
+              if [ "$(fork_sha "$branch")" = "$sha" ]; then
+                echo "$branch is already at $sha"
+                continue
+              fi
+              set_branch "$branch" "$sha"
+              start_builds "$branch"
+            done
 
             # The base commit of each open PR assigned to or written by the owner.
             # A PR's CI build merges it into its base as the base was when the
