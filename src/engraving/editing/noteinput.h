@@ -57,7 +57,7 @@ struct NoteInputParams {
     int drumPitch = -1;
 };
 
-// the tuplet waiting at the input position
+// the tuplets that the next note or rest creates
 struct TupletPreview {
     struct Level {
         Fraction ratio;

@@ -2093,17 +2093,17 @@ void NoteInput::cancelPendingTuplet(Score* score)
 
 //---------------------------------------------------------
 //   tupletPreview
-//    The tuplet waiting at the input position, with the
-//    tuplets nested in it: sized when it was asked for in By
-//    note name and Insert input, and by the next duration in
-//    By duration and Rhythm input
+//    The tuplets that the next note or rest creates: the
+//    tuplet waiting at the input position, with the tuplets
+//    nested in it, or else the levels of the continuing tuplet
+//    that aren't there yet
 //---------------------------------------------------------
 
 std::optional<TupletPreview> NoteInput::tupletPreview(const Score* score)
 {
     const InputState& is = score->inputState();
     const Staff* staff = is.track() != muse::nidx ? score->staff(track2staff(is.track())) : nullptr;
-    if (!is.segment() || !staff || !is.pendingTupletHere()) {
+    if (!is.segment() || !staff) {
         return std::nullopt;
     }
 
@@ -2131,34 +2131,66 @@ std::optional<TupletPreview> NoteInput::tupletPreview(const Score* score)
         timeStretch = staff->timeStretch(preview.tick);
     }
 
-    const PendingTuplet pending = pendingTupletAsAdded(score);
-    const TDuration duration = pendingTupletDuration(is);
-    TupletPreview::Level level;
-    TDuration baseLen;
-    // in By duration and Rhythm input, as if the input duration sized it
-    if (!pendingTupletShape(pending, pending.duration.value_or(duration), level.ratio, baseLen)) {
-        return std::nullopt;
-    }
-    level.numberType = pending.numberType;
-    level.bracketType = pending.bracketType;
-    Fraction factor = actualTicks(Fraction(1, 1), parent, timeStretch);
-    level.ticks = baseLen.fraction() * level.ratio.denominator() * factor;
-    preview.levels.push_back(level);
-    // the tuplets waiting inside it
-    for (const PendingTuplet& nested : pending.nested) {
-        factor /= level.ratio;
-        if (!pendingTupletShape(nested, *nested.duration, level.ratio, baseLen)) {
-            break;
+    if (is.pendingTupletHere()) {
+        const PendingTuplet pending = pendingTupletAsAdded(score);
+        const TDuration duration = pendingTupletDuration(is);
+        TupletPreview::Level level;
+        TDuration baseLen;
+        // in By duration and Rhythm input, as if the input duration sized it
+        if (!pendingTupletShape(pending, pending.duration.value_or(duration), level.ratio, baseLen)) {
+            return std::nullopt;
         }
-        level.numberType = nested.numberType;
-        level.bracketType = nested.bracketType;
+        level.numberType = pending.numberType;
+        level.bracketType = pending.bracketType;
+        Fraction factor = actualTicks(Fraction(1, 1), parent, timeStretch);
         level.ticks = baseLen.fraction() * level.ratio.denominator() * factor;
         preview.levels.push_back(level);
+        // the tuplets waiting inside it
+        for (const PendingTuplet& nested : pending.nested) {
+            factor /= level.ratio;
+            if (!pendingTupletShape(nested, *nested.duration, level.ratio, baseLen)) {
+                break;
+            }
+            level.numberType = nested.numberType;
+            level.bracketType = nested.bracketType;
+            level.ticks = baseLen.fraction() * level.ratio.denominator() * factor;
+            preview.levels.push_back(level);
+        }
+        preview.fits = pendingTupletFits(score, duration);
+        // in By note name and Insert input, its size is already known
+        preview.waiting = !pending.duration;
+        preview.inserts = is.usingNoteEntryMethod(NoteEntryMethod::TIMEWISE) && !is.beyondScore();
+        return preview;
     }
-    preview.fits = pendingTupletFits(score, duration);
-    // in By note name and Insert input, its size is already known
-    preview.waiting = !pending.duration;
-    preview.inserts = is.usingNoteEntryMethod(NoteEntryMethod::TIMEWISE) && !is.beyondScore();
+
+    if (!is.continuingTuplet() || !is.continueTupletsAllowed() || !is.continuingTupletGoesOn()) {
+        return std::nullopt;
+    }
+
+    // like addContinuingTuplets: the levels of the continuing tuplet that aren't here yet, from the outermost one in
+    const ContinuingTuplet& continuing = *is.continuingTuplet();
+    if (parent && !continuing.startsWith(parent)) {
+        return std::nullopt;
+    }
+    size_t level = 0;
+    for (const Tuplet* t = parent; t; t = t->tuplet()) {
+        ++level;
+    }
+    if (level >= continuing.levels.size()) {
+        return std::nullopt;
+    }
+
+    Fraction factor = actualTicks(Fraction(1, 1), parent, timeStretch);
+    for (; level < continuing.levels.size(); ++level) {
+        const ContinuingTuplet::Level& l = continuing.levels[level];
+        const Fraction ticks = l.baseLen.fraction() * l.ratio.denominator() * factor;
+        preview.levels.push_back({ l.ratio, l.numberType, l.bracketType, ticks });
+        factor /= l.ratio;
+    }
+    // where it doesn't fit, the next note or rest ends continuing tuplet input; in Insert input, its time is inserted
+    preview.inserts = is.usingNoteEntryMethod(NoteEntryMethod::TIMEWISE) && continuingTupletInsertsHere(is);
+    preview.fits = nextContinuingTupletFits(score, is);
+
     return preview;
 }
 
