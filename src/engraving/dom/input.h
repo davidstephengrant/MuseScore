@@ -61,10 +61,11 @@ enum class NoteEntryMethod : char {
 
 //---------------------------------------------------------
 //   PendingTuplet
-//    A tuplet asked for in By duration or Rhythm input. It
-//    waits at the input position where it was asked for, and
-//    the next duration sizes it and enters its first note or
-//    rest.
+//    A tuplet asked for during note input. It waits at the
+//    input position where it was asked for, and is added with
+//    the next note or rest. In By duration and Rhythm input,
+//    the next duration sizes it; in By note name input, the
+//    input duration when it was asked for.
 //---------------------------------------------------------
 
 struct PendingTuplet {
@@ -74,6 +75,8 @@ struct PendingTuplet {
     bool autoBaseLen = false;
     // the duration is the subdivision, rather than the length divided
     bool durationAsSubdivision = false;
+    // By note name: the duration that sizes the tuplet; otherwise the next duration does
+    std::optional<TDuration> duration;
     // given when it starts waiting, see InputState::forgetPendingTuplets()
     int number = 0;
 

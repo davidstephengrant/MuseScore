@@ -104,6 +104,17 @@ static Tie* createAndAddTie(Note* startNote, Note* endNote)
 void EditTie::cmdAddTie(Score* score, bool addToChord)
 {
     std::vector<Note*> noteList = cmdTieNoteList(score->selection(), score->noteEntryMode());
+
+    // a tuplet waiting at the input position takes a note tied from the chord before it, even where the selected chord is
+    // at the input position (after moving onto a note)
+    InputState& is = score->inputState();
+    if (score->noteEntryMode() && is.usingNoteEntryMethod(NoteEntryMethod::BY_NOTE_NAME) && is.pendingTupletHere() && is.segment()
+        && !is.beyondScore()) {
+        const Segment* before = is.segment()->prev1();
+        const ChordRest* prev = before ? before->nextChordRest(is.track(), /*backwards*/ true) : nullptr;
+        noteList = prev && prev->isChord() ? toChord(prev)->notes() : std::vector<Note*>();
+    }
+
     if (noteList.empty()) {
         LOGD("no notes selected");
         return;
@@ -118,8 +129,6 @@ void EditTie::cmdAddTie(Score* score, bool addToChord)
     Chord* lastAddedChord = nullptr;
 
     Transaction& tx = score->transactionManager()->currentOrDummyTransaction();
-
-    InputState& is = score->inputState();
 
     for (Note* note : noteList) {
         if (note->tieFor()) {
@@ -180,6 +189,10 @@ void EditTie::cmdAddTie(Score* score, bool addToChord)
         NoteVal nval(note->noteVal());
         if (!n) {
             n = NoteInput::addPitch(tx, score, nval, addFlag);
+            if (!n) {
+                // refused, e.g. where a tuplet waiting there doesn't fit
+                break;
+            }
             if (staffMove != 0) {
                 score->undo(new ChangeChordStaffMove(n->chord(), staffMove));
             }

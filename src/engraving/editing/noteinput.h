@@ -44,6 +44,7 @@ class TDuration;
 class Transaction;
 
 struct NoteVal;
+struct PendingTuplet;
 struct Position;
 
 enum class AccidentalType : unsigned char;
@@ -108,6 +109,9 @@ public:
 
     static void setDuration(Transaction& tx, Score* score, DurationType duration);
     static bool canAddPendingTuplet(const Score* score, DurationType duration);
+    static bool setPendingTuplet(Score* score, PendingTuplet pending);
+    static bool pendingTupletFitsHere(const Score* score);
+    static bool addPendingTupletForNote(Transaction& tx, Score* score, track_idx_t track);
     static std::optional<TupletPreview> tupletPreview(const Score* score);
     static void toggleRest(Transaction& tx, Score* score);
     static void toggleDots(Transaction& tx, Score* score, int dots, bool toggleForSelectionOnly = false);
