@@ -33,6 +33,7 @@
 #include "engraving/dom/staff.h"
 #include "engraving/dom/timesig.h"
 #include "engraving/dom/tuplet.h"
+#include "engraving/editing/edittie.h"
 #include "engraving/editing/edittuplet.h"
 #include "engraving/editing/noteinput.h"
 #include "engraving/editing/splitjoinmeasure.h"
@@ -2092,5 +2093,650 @@ TEST_F(Engraving_TupletTests, pendingTupletDottedUndo)
 
             delete score;
         }
+    }
+}
+
+//-----------------------------------------
+//    pending tuplets in By note name input
+//     the tuplet waits, sized by the input duration, and
+//     the next note or rest adds it, in an empty 4/4 score
+//-----------------------------------------
+
+static void enterNote(Score* score, int pitch = 60, bool addToChord = false)
+{
+    score->transactionManager()->transaction(TranslatableString::untranslatable("Pending tuplet tests"), [&](Transaction& tx) {
+        NoteVal nval(pitch);
+        NoteInput::addPitch(tx, score, nval, addToChord);
+    });
+}
+
+static void enterRest(Score* score)
+{
+    score->transactionManager()->transaction(TranslatableString::untranslatable("Pending tuplet tests"), [&](Transaction&) {
+        score->enterRest(score->inputState().duration());
+    });
+}
+
+// like R (repeat) in note input: the chord again at the input position, as a new chord
+static void repeatChord(Score* score, const Chord* chord)
+{
+    std::vector<NoteVal> notes;
+    for (const Note* note : chord->notes()) {
+        notes.push_back(note->noteVal());
+    }
+    score->transactionManager()->transaction(TranslatableString::untranslatable("Pending tuplet tests"), [&](Transaction& tx) {
+        for (size_t i = 0; i < notes.size(); ++i) {
+            NoteVal nval = notes[i];
+            if (!NoteInput::addPitch(tx, score, nval, i > 0) && i == 0) {
+                break;
+            }
+        }
+    });
+}
+
+// like a tuplet command in By note name input
+static bool waitForTuplet(Score* score, bool durationAsNoteValue, const Fraction& ratio = Fraction(3, 2))
+{
+    PendingTuplet pending;
+    pending.ratio = ratio;
+    pending.numberType = TupletNumberType::SHOW_NUMBER;
+    pending.bracketType = TupletBracketType::AUTO_BRACKET;
+    pending.autoBaseLen = true;
+    pending.durationAsNoteValue = durationAsNoteValue;
+    return NoteInput::setPendingTuplet(score, pending);
+}
+
+TEST_F(Engraving_TupletTests, pendingTupletNoteName)
+{
+    MasterScore* score = pendingTupletScore(NoteEntryMethod::BY_NOTE_NAME);
+    ASSERT_TRUE(score);
+    InputState& is = score->inputState();
+
+    // eighth, triplet: nothing is added until the next note
+    is.setDuration(DurationType::V_EIGHTH);
+    ASSERT_TRUE(waitForTuplet(score, true));
+    EXPECT_EQ(rhythm(measureAt(score, 0)), "R");
+    EXPECT_TRUE(is.pendingTupletHere());
+    EXPECT_EQ(is.duration().type(), DurationType::V_EIGHTH);
+
+    enterNote(score);
+    EXPECT_TRUE(score->sanityCheck());
+    EXPECT_EQ(rhythm(measureAt(score, 0)), "3:2[8 r8 r8] r4 r2");
+    EXPECT_FALSE(is.pendingTuplet());
+    EXPECT_EQ(is.tick(), Fraction(1, 12));
+    enterNote(score);
+    enterNote(score);
+    EXPECT_EQ(rhythm(measureAt(score, 0)), "3:2[8 8 8] r4 r2");
+
+    // undoing the first note takes the tuplet away too, and the tuplet waits again
+    for (int i = 0; i < 3; ++i) {
+        score->undoRedo(true, nullptr);
+    }
+    EXPECT_EQ(rhythm(measureAt(score, 0)), "R");
+    EXPECT_TRUE(is.pendingTupletHere());
+
+    delete score;
+}
+
+TEST_F(Engraving_TupletTests, pendingTupletNoteNameUndoAfterEscape)
+{
+    MasterScore* score = pendingTupletScore(NoteEntryMethod::BY_NOTE_NAME);
+    ASSERT_TRUE(score);
+    InputState& is = score->inputState();
+
+    // after Escape, undoing the first note doesn't bring the tuplet back
+    is.setDuration(DurationType::V_EIGHTH);
+    ASSERT_TRUE(waitForTuplet(score, true));
+    for (int i = 0; i < 3; ++i) {
+        enterNote(score);
+    }
+    is.forgetPendingTuplets();
+    for (int i = 0; i < 3; ++i) {
+        score->undoRedo(true, nullptr);
+    }
+    EXPECT_EQ(rhythm(measureAt(score, 0)), "R");
+    EXPECT_FALSE(is.pendingTuplet());
+
+    delete score;
+}
+
+TEST_F(Engraving_TupletTests, pendingTupletNoteNameDivide)
+{
+    MasterScore* score = pendingTupletScore(NoteEntryMethod::BY_NOTE_NAME);
+    ASSERT_TRUE(score);
+    InputState& is = score->inputState();
+
+    // quarter, triplet: the quarter divided into three eighths, the input duration
+    ASSERT_TRUE(waitForTuplet(score, false));
+    EXPECT_EQ(is.duration().type(), DurationType::V_EIGHTH);
+    enterNote(score);
+    EXPECT_TRUE(score->sanityCheck());
+    EXPECT_EQ(rhythm(measureAt(score, 0)), "3:2[8 r8 r8] r4 r2");
+
+    delete score;
+}
+
+TEST_F(Engraving_TupletTests, pendingTupletNoteNameFirstNote)
+{
+    MasterScore* score = pendingTupletScore(NoteEntryMethod::BY_NOTE_NAME);
+    ASSERT_TRUE(score);
+    InputState& is = score->inputState();
+
+    // eighth, triplet, then a quarter is the first note of the eighth triplet, not a quarter triplet
+    is.setDuration(DurationType::V_EIGHTH);
+    ASSERT_TRUE(waitForTuplet(score, true));
+    EXPECT_TRUE(NoteInput::canAddPendingTuplet(score, DurationType::V_WHOLE));
+    pressDuration(score, DurationType::V_QUARTER);
+    EXPECT_TRUE(is.pendingTupletHere());
+    enterNote(score);
+    EXPECT_TRUE(score->sanityCheck());
+    EXPECT_EQ(rhythm(measureAt(score, 0)), "3:2[4 r8] r4 r2");
+
+    pressDuration(score, DurationType::V_EIGHTH);
+    enterNote(score);
+    EXPECT_EQ(rhythm(measureAt(score, 0)), "3:2[4 8] r4 r2");
+
+    delete score;
+}
+
+TEST_F(Engraving_TupletTests, pendingTupletNoteNameAgain)
+{
+    // a tuplet asked for again while one waits: the same duration keeps what sized the waiting one
+    struct Case {
+        DurationType first;
+        bool durationAsNoteValue;
+        DurationType changeTo;
+        Fraction ratio;
+        std::string expected;
+    };
+    const std::vector<Case> cases {
+        // eighth, triplet, quintuplet: an eighth quintuplet
+        { DurationType::V_EIGHTH, true, DurationType::V_INVALID, Fraction(5, 4), "5:4[8 r8 r8 r8 r8] r2" },
+        // eighth, triplet, quarter, triplet: a quarter triplet
+        { DurationType::V_EIGHTH, true, DurationType::V_QUARTER, Fraction(3, 2), "3:2[4 r4 r4] r2" },
+        // quarter divided into a triplet, then a quintuplet: the quarter divided into five
+        { DurationType::V_QUARTER, false, DurationType::V_INVALID, Fraction(5, 4), "5:4[16 r16 r16 r16 r16] r4 r2" },
+        // quarter divided into a triplet, then half, triplet: the half divided into three
+        { DurationType::V_QUARTER, false, DurationType::V_HALF, Fraction(3, 2), "3:2[4 r4 r4] r2" },
+    };
+    for (const Case& c : cases) {
+        MasterScore* score = pendingTupletScore(NoteEntryMethod::BY_NOTE_NAME);
+        ASSERT_TRUE(score);
+
+        score->inputState().setDuration(c.first);
+        ASSERT_TRUE(waitForTuplet(score, c.durationAsNoteValue));
+        if (c.changeTo != DurationType::V_INVALID) {
+            pressDuration(score, c.changeTo);
+        }
+        ASSERT_TRUE(waitForTuplet(score, c.durationAsNoteValue, c.ratio));
+        enterNote(score);
+        EXPECT_TRUE(score->sanityCheck());
+        EXPECT_EQ(rhythm(measureAt(score, 0)), c.expected);
+
+        delete score;
+    }
+}
+
+TEST_F(Engraving_TupletTests, pendingTupletNoteNameDoesNotFit)
+{
+    MasterScore* score = pendingTupletScore(NoteEntryMethod::BY_NOTE_NAME);
+    ASSERT_TRUE(score);
+    InputState& is = score->inputState();
+
+    // a half and a quarter, then a quarter triplet on beat 4 doesn't fit: nothing waits
+    is.setDuration(DurationType::V_HALF);
+    enterNote(score);
+    is.setDuration(DurationType::V_QUARTER);
+    enterNote(score);
+    EXPECT_FALSE(waitForTuplet(score, true));
+    EXPECT_FALSE(is.pendingTuplet());
+
+    // an eighth triplet fits; asked for again as a quarter triplet, it doesn't, and the eighth triplet keeps waiting
+    is.setDuration(DurationType::V_EIGHTH);
+    ASSERT_TRUE(waitForTuplet(score, true));
+    pressDuration(score, DurationType::V_QUARTER);
+    EXPECT_FALSE(waitForTuplet(score, true));
+    EXPECT_TRUE(is.pendingTupletHere());
+    pressDuration(score, DurationType::V_EIGHTH);
+    enterNote(score);
+    EXPECT_TRUE(score->sanityCheck());
+    EXPECT_EQ(rhythm(measureAt(score, 0)), "2 4 3:2[8 r8 r8]");
+
+    delete score;
+}
+
+TEST_F(Engraving_TupletTests, pendingTupletNoteNameRest)
+{
+    MasterScore* score = pendingTupletScore(NoteEntryMethod::BY_NOTE_NAME);
+    ASSERT_TRUE(score);
+    InputState& is = score->inputState();
+
+    is.setDuration(DurationType::V_EIGHTH);
+    ASSERT_TRUE(waitForTuplet(score, true));
+    enterRest(score);
+    EXPECT_TRUE(score->sanityCheck());
+    EXPECT_EQ(rhythm(measureAt(score, 0)), "3:2[r8 r8 r8] r4 r2");
+    EXPECT_FALSE(is.pendingTuplet());
+    EXPECT_EQ(is.tick(), Fraction(1, 12));
+
+    enterNote(score);
+    EXPECT_EQ(rhythm(measureAt(score, 0)), "3:2[r8 8 r8] r4 r2");
+
+    delete score;
+}
+
+TEST_F(Engraving_TupletTests, pendingTupletNoteNameEntryPaths)
+{
+    // a note entered by letter, by MIDI or with the mouse
+    const std::vector<std::function<void(Score*)> > paths {
+        [](Score* score) {
+            score->transactionManager()->transaction(TranslatableString::untranslatable("Pending tuplet tests"), [&](Transaction& tx) {
+                NoteInput::addPitch(tx, score, NoteInputParams { 0 }, false, false);
+            });
+        },
+        [](Score* score) { enterNote(score); },
+        [](Score* score) {
+            Position pos;
+            pos.segment = score->tick2segment(Fraction(0, 1), false, SegmentType::ChordRest);
+            pos.staffIdx = 0;
+            pos.line = 4;
+            score->transactionManager()->transaction(TranslatableString::untranslatable("Pending tuplet tests"), [&](Transaction& tx) {
+                NoteInput::putNote(tx, score, pos, false);
+            });
+        },
+    };
+    for (const auto& enter : paths) {
+        MasterScore* score = pendingTupletScore(NoteEntryMethod::BY_NOTE_NAME);
+        ASSERT_TRUE(score);
+        InputState& is = score->inputState();
+
+        is.setDuration(DurationType::V_EIGHTH);
+        ASSERT_TRUE(waitForTuplet(score, true));
+        enter(score);
+        EXPECT_TRUE(score->sanityCheck());
+        EXPECT_EQ(rhythm(measureAt(score, 0)), "3:2[8 r8 r8] r4 r2");
+        EXPECT_FALSE(is.pendingTuplet());
+
+        delete score;
+    }
+}
+
+TEST_F(Engraving_TupletTests, pendingTupletNoteNameMovedAway)
+{
+    MasterScore* score = pendingTupletScore(NoteEntryMethod::BY_NOTE_NAME);
+    ASSERT_TRUE(score);
+    InputState& is = score->inputState();
+
+    // the input position moves to bar 2: an ordinary note there
+    is.setDuration(DurationType::V_EIGHTH);
+    ASSERT_TRUE(waitForTuplet(score, true));
+    is.setSegment(score->tick2segment(Fraction(1, 1), false, SegmentType::ChordRest));
+    enterNote(score);
+    EXPECT_EQ(rhythm(measureAt(score, 0)), "R");
+    EXPECT_EQ(rhythm(measureAt(score, 1)), "8 r8 r4 r2");
+    EXPECT_FALSE(is.pendingTuplet());
+
+    // a note entered with the mouse elsewhere: the same
+    is.setSegment(score->tick2segment(Fraction(0, 1), false, SegmentType::ChordRest));
+    ASSERT_TRUE(waitForTuplet(score, true));
+    Position pos;
+    pos.segment = score->tick2segment(Fraction(2, 1), false, SegmentType::ChordRest);
+    pos.staffIdx = 0;
+    pos.line = 4;
+    score->transactionManager()->transaction(TranslatableString::untranslatable("Pending tuplet tests"), [&](Transaction& tx) {
+        NoteInput::putNote(tx, score, pos, false);
+    });
+    EXPECT_TRUE(score->sanityCheck());
+    EXPECT_EQ(rhythm(measureAt(score, 0)), "R");
+    EXPECT_EQ(rhythm(measureAt(score, 2)), "8 r8 r4 r2");
+    EXPECT_FALSE(is.pendingTuplet());
+
+    delete score;
+}
+
+TEST_F(Engraving_TupletTests, pendingTupletNoteNameBeyondScore)
+{
+    // past the last measure, by MIDI or by letter: the tuplet goes in a new measure
+    for (bool byLetter : { false, true }) {
+        MasterScore* score = pendingTupletScore(NoteEntryMethod::BY_NOTE_NAME);
+        ASSERT_TRUE(score);
+        InputState& is = score->inputState();
+
+        const int measures = score->nmeasures();
+        is.setSegment(score->lastMeasure()->first(SegmentType::ChordRest));
+        is.setBeyondScore(true);
+        is.setDuration(DurationType::V_EIGHTH);
+        ASSERT_TRUE(waitForTuplet(score, true));
+        if (byLetter) {
+            score->transactionManager()->transaction(TranslatableString::untranslatable("Pending tuplet tests"), [&](Transaction& tx) {
+                NoteInput::addPitch(tx, score, NoteInputParams { 0 }, false, false);
+            });
+        } else {
+            enterNote(score);
+        }
+        EXPECT_TRUE(score->sanityCheck());
+        ASSERT_EQ(score->nmeasures(), measures + 1);
+        EXPECT_EQ(rhythm(score->lastMeasure()), "3:2[8 r8 r8] r4 r2");
+
+        delete score;
+    }
+}
+
+TEST_F(Engraving_TupletTests, pendingTupletNoteNameOtherVoiceSelected)
+{
+    MasterScore* score = pendingTupletScore();
+    ASSERT_TRUE(score);
+    InputState& is = score->inputState();
+
+    // the tuplet and its first note go in the input voice
+    enterVoice2Quarters(score);
+    is.setNoteEntryMethod(NoteEntryMethod::BY_NOTE_NAME);
+    is.setDuration(DurationType::V_EIGHTH);
+    ASSERT_TRUE(waitForTuplet(score, true));
+    enterNote(score);
+    EXPECT_TRUE(score->sanityCheck());
+    EXPECT_EQ(rhythm(measureAt(score, 0)), "3:2[8 r8 r8] r4 r2");
+    EXPECT_EQ(is.track(), 0);
+    EXPECT_EQ(is.tick(), Fraction(1, 12));
+
+    delete score;
+}
+
+TEST_F(Engraving_TupletTests, pendingTupletNoteNameInsideLongerChordRest)
+{
+    // the tuplet waits on beat 2, inside a half note or rest: it shortens it, as a plain note does
+    for (bool rest : { false, true }) {
+        MasterScore* score = pendingTupletScore();
+        ASSERT_TRUE(score);
+        InputState& is = score->inputState();
+
+        is.setRest(rest);
+        pressDuration(score, DurationType::V_HALF);
+        is.setRest(false);
+        enterVoice2Quarters(score);
+        is.setNoteEntryMethod(NoteEntryMethod::BY_NOTE_NAME);
+        is.setSegment(score->tick2segment(Fraction(1, 4), false, SegmentType::ChordRest));
+        ASSERT_FALSE(is.cr());
+
+        is.setDuration(DurationType::V_EIGHTH);
+        ASSERT_TRUE(waitForTuplet(score, true));
+        enterNote(score);
+        EXPECT_TRUE(score->sanityCheck());
+        EXPECT_EQ(rhythm(measureAt(score, 0)), std::string(rest ? "r4" : "4") + " 3:2[8 r8 r8] r2");
+        EXPECT_EQ(is.track(), 0);
+
+        delete score;
+    }
+}
+
+TEST_F(Engraving_TupletTests, pendingTupletRepeat)
+{
+    // By note name: R after a chord takes the waiting tuplet, as any next note does
+    MasterScore* score = pendingTupletScore(NoteEntryMethod::BY_NOTE_NAME);
+    ASSERT_TRUE(score);
+    InputState& is = score->inputState();
+    is.setDuration(DurationType::V_EIGHTH);
+    enterNote(score, 60);
+    enterNote(score, 64, true);
+    ASSERT_TRUE(waitForTuplet(score, true));
+    repeatChord(score, toChord(chordRestAt(measureAt(score, 0), 0)));
+    EXPECT_TRUE(score->sanityCheck());
+    EXPECT_EQ(rhythm(measureAt(score, 0)), "8 3:2[8 r8 r8] r8 r2");
+    EXPECT_FALSE(is.pendingTuplet());
+    const ChordRest* repeated = chordRestAt(measureAt(score, 0), 1);
+    ASSERT_TRUE(repeated && repeated->isChord());
+    EXPECT_EQ(toChord(repeated)->notes().size(), 2u);
+    EXPECT_TRUE(repeated->tuplet());
+    delete score;
+
+    // By duration: R isn't a duration, so it enters an ordinary chord, and the tuplet no longer waits there
+    score = pendingTupletScore(NoteEntryMethod::BY_DURATION);
+    ASSERT_TRUE(score);
+    InputState& is2 = score->inputState();
+    is2.setNotes({ NoteVal(60), NoteVal(64) });
+    pressDuration(score, DurationType::V_EIGHTH);
+    ASSERT_EQ(rhythm(measureAt(score, 0)), "8 r8 r4 r2");
+    setPendingTriplet(score, true);
+    repeatChord(score, toChord(chordRestAt(measureAt(score, 0), 0)));
+    EXPECT_TRUE(score->sanityCheck());
+    EXPECT_EQ(rhythm(measureAt(score, 0)), "8 8 r4 r2");
+    EXPECT_FALSE(is2.pendingTupletHere());
+    delete score;
+}
+
+TEST_F(Engraving_TupletTests, pendingTupletNoteNameAddToChord)
+{
+    MasterScore* score = pendingTupletScore(NoteEntryMethod::BY_NOTE_NAME);
+    ASSERT_TRUE(score);
+    InputState& is = score->inputState();
+
+    // a note added to the chord just entered leaves the tuplet waiting after it
+    is.setDuration(DurationType::V_EIGHTH);
+    enterNote(score, 60);
+    ASSERT_TRUE(waitForTuplet(score, true));
+    enterNote(score, 64, true);
+    EXPECT_TRUE(is.pendingTupletHere());
+    EXPECT_EQ(rhythm(measureAt(score, 0)), "8 r8 r4 r2");
+    EXPECT_EQ(toChord(chordRestAt(measureAt(score, 0), 0))->notes().size(), 2u);
+
+    enterNote(score, 67);
+    EXPECT_TRUE(score->sanityCheck());
+    EXPECT_EQ(rhythm(measureAt(score, 0)), "8 3:2[8 r8 r8] r8 r2");
+
+    delete score;
+}
+
+TEST_F(Engraving_TupletTests, pendingTupletNoteNameTie)
+{
+    // after a chord: the tie key ties both notes into the waiting triplet
+    MasterScore* score = pendingTupletScore(NoteEntryMethod::BY_NOTE_NAME);
+    ASSERT_TRUE(score);
+    InputState& is = score->inputState();
+    is.setDuration(DurationType::V_EIGHTH);
+    enterNote(score, 60);
+    enterNote(score, 64, true);
+    ASSERT_TRUE(waitForTuplet(score, true));
+    EditTie::cmdAddTie(score);
+    EXPECT_TRUE(score->sanityCheck());
+    EXPECT_EQ(rhythm(measureAt(score, 0)), "8 3:2[8 r8 r8] r8 r2");
+    EXPECT_FALSE(is.pendingTuplet());
+    const ChordRest* tied = chordRestAt(measureAt(score, 0), 1);
+    ASSERT_TRUE(tied && tied->isChord());
+    EXPECT_EQ(toChord(tied)->notes().size(), 2u);
+    for (const Note* note : toChord(tied)->notes()) {
+        EXPECT_TRUE(note->tieBack());
+    }
+    delete score;
+
+    // with the input position moved back onto a note (D, after the chord), the triplet waits there and takes a note
+    // tied from the chord before it, rather than the selected D being tied into the next position
+    score = pendingTupletScore(NoteEntryMethod::BY_NOTE_NAME);
+    ASSERT_TRUE(score);
+    InputState& is2 = score->inputState();
+    is2.setDuration(DurationType::V_EIGHTH);
+    enterNote(score, 60);
+    enterNote(score, 64, true);
+    enterNote(score, 62);
+    enterNote(score, 65);
+    is2.setSegment(score->tick2segment(Fraction(1, 8), false, SegmentType::ChordRest));
+    score->select(toChord(is2.cr())->upNote());
+    ASSERT_TRUE(waitForTuplet(score, true));
+    EditTie::cmdAddTie(score);
+    EXPECT_TRUE(score->sanityCheck());
+    EXPECT_EQ(rhythm(measureAt(score, 0)), "8 3:2[8 r8 r8] r8 r2");
+    EXPECT_FALSE(is2.pendingTuplet());
+    const ChordRest* chord = chordRestAt(measureAt(score, 0), 0);
+    tied = chordRestAt(measureAt(score, 0), 1);
+    ASSERT_TRUE(chord && chord->isChord() && tied && tied->isChord());
+    EXPECT_TRUE(tied->tuplet());
+    ASSERT_EQ(toChord(tied)->notes().size(), 2u);
+    ASSERT_TRUE(toChord(tied)->downNote()->tieBack() && toChord(tied)->upNote()->tieBack());
+    EXPECT_EQ(toChord(tied)->downNote()->tieBack()->startNote(), toChord(chord)->downNote());
+    EXPECT_EQ(toChord(tied)->upNote()->tieBack()->startNote(), toChord(chord)->upNote());
+    delete score;
+}
+
+TEST_F(Engraving_TupletTests, pendingTupletNoteNameDrums)
+{
+    MasterScore* score = ScoreRW::readScore(TUPLET_DATA_DIR + u"tupletDrums.mscx");
+    ASSERT_TRUE(score);
+    InputState& is = score->inputState();
+    is.setTrack(0);
+    is.setSegment(score->tick2segment(Fraction(0, 1), false, SegmentType::ChordRest));
+    is.setDuration(DurationType::V_EIGHTH);
+    is.setNoteEntryMode(true);
+    is.setNoteEntryMethod(NoteEntryMethod::BY_NOTE_NAME);
+
+    auto enterDrum = [score](int drumPitch) {
+        score->transactionManager()->transaction(TranslatableString::untranslatable("Pending tuplet tests"), [&](Transaction& tx) {
+            NoteInput::addPitch(tx, score, NoteInputParams { 0, drumPitch }, false, false);
+        });
+    };
+
+    // a snare (voice 1) takes the tuplet
+    ASSERT_TRUE(waitForTuplet(score, true));
+    enterDrum(38);
+    EXPECT_TRUE(score->sanityCheck());
+    EXPECT_EQ(rhythm(measureAt(score, 0)), "3:2[8 r8 r8] r4 r2");
+
+    // a bass drum (voice 2) cancels it, as a voice change does: no empty tuplet in voice 1
+    is.setTrack(0);
+    is.setSegment(score->tick2segment(Fraction(1, 2), false, SegmentType::ChordRest));
+    ASSERT_TRUE(waitForTuplet(score, true));
+    enterDrum(36);
+    EXPECT_TRUE(score->sanityCheck());
+    EXPECT_FALSE(is.pendingTuplet());
+    EXPECT_EQ(rhythm(measureAt(score, 0)), "3:2[8 r8 r8] r4 r2");
+    const Segment* s = score->tick2segment(Fraction(1, 2), false, SegmentType::ChordRest);
+    ASSERT_TRUE(s && s->element(1));
+    const ChordRest* bassDrum = toChordRest(s->element(1));
+    EXPECT_TRUE(bassDrum->isChord());
+    EXPECT_FALSE(bassDrum->tuplet());
+
+    delete score;
+}
+
+TEST_F(Engraving_TupletTests, pendingTupletNoteNameDotPreviousNote)
+{
+    MasterScore* score = pendingTupletScore(NoteEntryMethod::BY_NOTE_NAME);
+    ASSERT_TRUE(score);
+    InputState& is = score->inputState();
+
+    // a half and two eighths, then an eighth triplet waits on beat 4
+    is.setDuration(DurationType::V_HALF);
+    enterNote(score);
+    is.setDuration(DurationType::V_EIGHTH);
+    enterNote(score);
+    enterNote(score);
+    ASSERT_TRUE(waitForTuplet(score, true));
+
+    // dotting the second eighth moves the input position to 13/16, where the triplet doesn't fit: it's cancelled
+    score->transactionManager()->transaction(TranslatableString::untranslatable("Pending tuplet tests"), [&](Transaction& tx) {
+        NoteInput::toggleDots(tx, score, 1, true /*toggleForSelectionOnly*/);
+    });
+    EXPECT_EQ(rhythm(measureAt(score, 0)), "2 8 8. r16 r8");
+    EXPECT_FALSE(is.pendingTuplet());
+
+    delete score;
+}
+
+//-----------------------------------------
+//    pending tuplets in By note name input with dotted
+//     durations: single and double dots, before and after
+//     the tuplet command
+//-----------------------------------------
+
+TEST_F(Engraving_TupletTests, pendingTupletNoteNameDottedNoteValue)
+{
+    // the dots chosen before the tuplet command: a dotted or double-dotted eighth triplet
+    for (int dots : { 1, 2 }) {
+        for (bool rest : { false, true }) {
+            MasterScore* score = pendingTupletScore(NoteEntryMethod::BY_NOTE_NAME);
+            ASSERT_TRUE(score);
+            InputState& is = score->inputState();
+
+            TDuration eighth(DurationType::V_EIGHTH);
+            eighth.setDots(dots);
+            is.setDuration(eighth);
+            ASSERT_TRUE(waitForTuplet(score, true));
+            if (rest) {
+                enterRest(score);
+            } else {
+                enterNote(score);
+            }
+            EXPECT_TRUE(score->sanityCheck());
+            const std::string r = rest ? "r" : "";
+            EXPECT_EQ(rhythm(measureAt(score, 0)), dots == 1 ? "3:2[" + r + "8. r8. r8.] r8 r2" : "3:2[" + r + "8.. r8.. r8..] r16 r2");
+            EXPECT_EQ(is.duration().dots(), dots);
+
+            delete score;
+        }
+    }
+}
+
+TEST_F(Engraving_TupletTests, pendingTupletNoteNameDotAfterCommand)
+{
+    // eighth, triplet, then a dot: the first note is dotted, in the eighth triplet
+    for (int dots : { 1, 2 }) {
+        MasterScore* score = pendingTupletScore(NoteEntryMethod::BY_NOTE_NAME);
+        ASSERT_TRUE(score);
+        InputState& is = score->inputState();
+
+        is.setDuration(DurationType::V_EIGHTH);
+        ASSERT_TRUE(waitForTuplet(score, true));
+        pressDot(score, dots);
+        EXPECT_TRUE(is.pendingTupletHere());
+        enterNote(score);
+        EXPECT_TRUE(score->sanityCheck());
+        EXPECT_EQ(rhythm(measureAt(score, 0)), dots == 1 ? "3:2[8. r16 r8] r4 r2" : "3:2[8.. r32 r8] r4 r2");
+        EXPECT_EQ(is.tick(), dots == 1 ? Fraction(1, 8) : Fraction(7, 48));
+        const ChordRest* first = chordRestAt(measureAt(score, 0), 0);
+        ASSERT_TRUE(first && first->tuplet());
+        EXPECT_EQ(first->tuplet()->baseLen().type(), DurationType::V_EIGHTH);
+        EXPECT_EQ(first->tuplet()->baseLen().dots(), 0);
+
+        delete score;
+    }
+}
+
+TEST_F(Engraving_TupletTests, pendingTupletNoteNameDottedDivide)
+{
+    // triplet, dotted half: three quarters (3:3); triplet, double-dotted half: three eighths in the time of 7
+    for (int dots : { 1, 2 }) {
+        MasterScore* score = pendingTupletScore(NoteEntryMethod::BY_NOTE_NAME);
+        ASSERT_TRUE(score);
+        InputState& is = score->inputState();
+
+        TDuration half(DurationType::V_HALF);
+        half.setDots(dots);
+        is.setDuration(half);
+        ASSERT_TRUE(waitForTuplet(score, false));
+        EXPECT_EQ(is.duration().type(), dots == 1 ? DurationType::V_QUARTER : DurationType::V_EIGHTH);
+        EXPECT_EQ(is.duration().dots(), 0);
+        enterNote(score);
+        EXPECT_TRUE(score->sanityCheck());
+        EXPECT_EQ(rhythm(measureAt(score, 0)), dots == 1 ? "3:3[4 r4 r4] r4" : "3:7[8 r8 r8] r8");
+
+        delete score;
+    }
+}
+
+TEST_F(Engraving_TupletTests, pendingTupletNoteNameDottedAgain)
+{
+    // dotted or double-dotted eighth, triplet, quintuplet: a dotted or double-dotted eighth quintuplet
+    for (int dots : { 1, 2 }) {
+        MasterScore* score = pendingTupletScore(NoteEntryMethod::BY_NOTE_NAME);
+        ASSERT_TRUE(score);
+
+        TDuration eighth(DurationType::V_EIGHTH);
+        eighth.setDots(dots);
+        score->inputState().setDuration(eighth);
+        ASSERT_TRUE(waitForTuplet(score, true));
+        ASSERT_TRUE(waitForTuplet(score, true, Fraction(5, 4)));
+        enterNote(score);
+        EXPECT_TRUE(score->sanityCheck());
+        EXPECT_EQ(rhythm(measureAt(score, 0)), dots == 1 ? "5:4[8. r8. r8. r8. r8.] r4" : "5:4[8.. r8.. r8.. r8.. r8..] r8");
+
+        delete score;
     }
 }
