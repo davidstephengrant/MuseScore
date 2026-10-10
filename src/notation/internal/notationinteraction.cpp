@@ -93,6 +93,7 @@
 #include "engraving/dom/stafftype.h"
 #include "engraving/dom/stafftypechange.h"
 #include "engraving/dom/system.h"
+#include "engraving/dom/text.h"
 #include "engraving/dom/tuplet.h"
 #include "engraving/dom/utils.h"
 #include "engraving/editing/editbeam.h"
@@ -433,6 +434,8 @@ void NotationInteraction::paint(Painter* painter, const engraving::rendering::Pa
 
     if (shouldDrawInputPreview()) {
         drawInputPreview(painter, opt);
+    } else if (m_noteInput->isNoteInputMode()) {
+        drawTupletPreview(painter, opt, RectF());
     }
 
     score()->renderer()->drawItem(score()->shadowNote(), painter, opt);
@@ -3604,7 +3607,182 @@ void NotationInteraction::drawInputPreview(Painter* painter, const engraving::re
         }
     }
 
+    RectF previewRect;
+    for (const ShadowNote* preview : previewList) {
+        previewRect.unite(preview->ldata()->bbox().translated(preview->pos()));
+    }
+    drawTupletPreview(painter, opt, previewRect);
+
     DeleteAll(previewList);
+}
+
+//! NOTE: the x position of tick in the measure, between its chords and rests
+static double measureXAt(const Measure* measure, const Fraction& tick)
+{
+    Fraction prevTick = measure->tick();
+    double prevX = 0.0;
+    for (const Segment* s = measure->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        if (s->tick() == tick) {
+            return s->x();
+        }
+        if (s->tick() > tick) {
+            return prevX + (s->x() - prevX) * ((tick - prevTick) / (s->tick() - prevTick)).toDouble();
+        }
+        prevTick = s->tick();
+        prevX = s->x();
+    }
+
+    const Fraction endTick = measure->endTick();
+    if (endTick <= prevTick) {
+        return measure->width();
+    }
+    return prevX + (measure->width() - prevX) * ((tick - prevTick) / (endTick - prevTick)).toDouble();
+}
+
+void NotationInteraction::drawTupletPreview(Painter* painter, const engraving::rendering::PaintOptions& opt, const RectF& previewRect)
+{
+    const std::optional<TupletPreview> tuplet = NoteInput::tupletPreview(score());
+    if (!tuplet || tuplet->levels.empty()) {
+        return;
+    }
+
+    const InputState& is = score()->inputState();
+    const Measure* measure = is.segment()->measure();
+    const System* system = measure->system();
+    const SysStaff* sysStaff = system ? system->staff(is.staffIdx()) : nullptr;
+    const Staff* staff = score()->staff(is.staffIdx());
+    const Measure* lastMeasure = score()->lastMeasure();
+    if (!sysStaff || !staff || !lastMeasure) {
+        return;
+    }
+
+    const MStyle& style = score()->style();
+    const Fraction tick = is.segment()->tick();
+    const double mag = staff->staffMag(tick);
+    const double distance = style.styleAbsolute(Sid::tupletVStemDistance) * mag;
+    const double hook = style.styleAbsolute(Sid::tupletBracketHookHeight) * mag;
+    // the gap around the number, as in TupletLayout
+    const double numberGap = 0.35 * style.spatium() * mag;
+
+    const PointF measurePos = measure->canvasPos();
+    const double staffTop = measurePos.y() + sysStaff->y();
+    const double staffBottom = staffTop + staff->staffHeight(tick);
+
+    // from the preview notes, or else from the input position
+    double x1 = previewRect.left();
+    if (previewRect.isNull()) {
+        x1 = is.beyondScore() ? measurePos.x() + measure->width() + style.spatium() : measurePos.x() + is.segment()->x();
+    }
+
+    // clear the preview notes and the music already in the outermost tuplet's time
+    RectF musicRect(x1, staffTop, 0.0, staffBottom - staffTop);
+    musicRect.unite(previewRect);
+    if (!is.beyondScore() && !tuplet->waiting) {
+        const Fraction length = tuplet->levels.front().ticks;
+        const Fraction end = tuplet->tick + (tuplet->inserts ? length : std::min(length, tuplet->space));
+        for (const Segment* s = is.segment(); s && s->tick() < end && s->measure()->system() == system;
+             s = s->next1(SegmentType::ChordRest)) {
+            const RectF shapeRect = s->staffShape(is.staffIdx()).bbox();
+            if (!shapeRect.isNull()) {
+                musicRect.unite(shapeRect.translated(s->measure()->canvasPos().x() + s->x(), staffTop));
+            }
+        }
+    }
+
+    // above the staff, or below it in voices 2 and 4
+    const bool up = is.voice() % 2 == 0;
+    double edge = up ? musicRect.top() : musicRect.bottom();
+
+    // a waiting tuplet's length depends on the next duration: only its number, never as not fitting
+    const bool fits = tuplet->fits || tuplet->waiting;
+    // the colour of the preview notes, as in doShowShadowNote
+    Color color = configuration()->noteInputPreviewColor();
+    if (!color.isValid() || color == configuration()->selectionColor()) {
+        color = configuration()->highlightSelectionColor(is.voice());
+    }
+    if (!fits) {
+        // lightened like the voice colours (highlightSelectionColor), to sit beside them
+        color = Color::fromQColor(engravingConfiguration()->criticalColor().toQColor().lighter(135));
+    }
+    Pen pen(color, style.styleAbsolute(Sid::tupletBracketWidth) * mag);
+    pen.setJoinStyle(PenJoinStyle::MiterJoin);
+    pen.setCapStyle(PenCapStyle::FlatCap);
+
+    // from the innermost tuplet out, each further from the staff
+    for (auto it = tuplet->levels.rbegin(); it != tuplet->levels.rend(); ++it) {
+        // a tuplet that doesn't fit runs up to the barline or the end of the tuplet it is in, without an end hook
+        bool levelFits = it->ticks <= tuplet->space;
+        const Fraction length = levelFits ? it->ticks : tuplet->space;
+        double x2 = 0.0;
+        if (tuplet->waiting) {
+            x2 = previewRect.isNull() ? x1 : previewRect.right();
+        } else if (tuplet->inserts) {
+            // its whole length, into the next measures on this system; beyond them, open-ended at the last barline
+            const Fraction end = tuplet->tick + it->ticks;
+            const Measure* endMeasure = measure;
+            const Measure* lastOnSystem = measure;
+            while (endMeasure && end > endMeasure->endTick()) {
+                endMeasure = endMeasure->nextMeasure();
+                if (endMeasure && endMeasure->system() == system) {
+                    lastOnSystem = endMeasure;
+                }
+            }
+            levelFits = endMeasure && endMeasure->system() == system;
+            x2 = levelFits ? endMeasure->canvasPos().x() + measureXAt(endMeasure, end)
+                 : lastOnSystem->canvasPos().x() + lastOnSystem->width();
+        } else if (is.beyondScore()) {
+            // as in the measure that the next note appends, cut off at the page's edge
+            x2 = x1 + lastMeasure->width() * (length / lastMeasure->ticks()).toDouble();
+            const Page* page = system->page();
+            const double pageRight = page ? page->ldata()->bbox().translated(page->pos()).right() - style.spatium() : x2;
+            if (x2 > pageRight) {
+                x2 = pageRight;
+                levelFits = false;
+            }
+        } else {
+            x2 = measurePos.x() + measureXAt(measure, tuplet->tick + length);
+        }
+        if (levelFits && !tuplet->waiting) {
+            x2 -= style.styleAbsolute(Sid::minNoteDistance) * mag;
+        }
+        x2 = std::max(x2, previewRect.isNull() ? x1 : previewRect.right());
+
+        // always a number, even where the score hides tuplet numbers: it tells which tuplet is coming
+        const TupletNumberType numberType = it->numberType == TupletNumberType::NO_TEXT ? TupletNumberType::SHOW_NUMBER
+                                            : it->numberType;
+        Text* number = Factory::createText(score()->dummy(), TextStyleType::TUPLET);
+        number->setXmlText(Tuplet::numberText(it->ratio, numberType, style.styleB(Sid::tupletUseSymbols)));
+        number->setColor(color);
+        number->mutldata()->setMag(mag);
+        score()->renderer()->layoutText1(number);
+        const RectF numberRect = number->ldata()->bbox();
+        const double numberWidth = numberRect.width();
+        const double halfHeight = std::max(numberRect.height() * 0.5, hook);
+
+        const double y = up ? edge - distance - halfHeight : edge + distance + halfHeight;
+        const double yHook = up ? y + hook : y - hook;
+        edge = up ? y - halfHeight : y + halfHeight;
+
+        const double xNumber = (x1 + x2) * 0.5;
+        const PointF numberPos(xNumber - numberRect.center().x(), y - numberRect.center().y());
+        painter->translate(numberPos);
+        score()->renderer()->drawItem(number, painter, opt);
+        painter->translate(-numberPos);
+        delete number;
+
+        // in tight spacing, only the number
+        const double xGapLeft = xNumber - numberWidth * 0.5 - numberGap;
+        const double xGapRight = xNumber + numberWidth * 0.5 + numberGap;
+        if (tuplet->waiting || xGapLeft - x1 < hook * 0.5 || x2 - xGapRight < hook * 0.5) {
+            continue;
+        }
+
+        const PointF left[] = { PointF(x1, yHook), PointF(x1, y), PointF(xGapLeft, y) };
+        const PointF right[] = { PointF(xGapRight, y), PointF(x2, y), PointF(x2, yHook) };
+        painter->setPen(pen);
+        painter->drawPolyline(left, 3);
+        painter->drawPolyline(right, levelFits ? 3 : 2);
+    }
 }
 
 void NotationInteraction::drawAnchorLines(Painter* painter)

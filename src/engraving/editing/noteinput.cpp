@@ -1919,6 +1919,95 @@ bool NoteInput::setPendingTuplet(Score* score, PendingTuplet pending)
 }
 
 //---------------------------------------------------------
+//   tupletPreview
+//    The tuplets that the next note or rest creates: the
+//    tuplet waiting at the input position, sized by the input
+//    duration, or else the levels of the sticky tuplet that
+//    aren't there yet
+//---------------------------------------------------------
+
+std::optional<TupletPreview> NoteInput::tupletPreview(const Score* score)
+{
+    const InputState& is = score->inputState();
+    const Staff* staff = is.track() != muse::nidx ? score->staff(track2staff(is.track())) : nullptr;
+    if (!is.segment() || !staff) {
+        return std::nullopt;
+    }
+
+    TupletPreview preview;
+    Tuplet* parent = nullptr;
+    Fraction timeStretch(1, 1);
+    if (is.beyondScore()) {
+        // a new measure like the last one
+        const Measure* last = score->lastMeasure();
+        if (!last) {
+            return std::nullopt;
+        }
+        preview.tick = score->endTick();
+        preview.space = last->ticks();
+    } else {
+        const ChordRest* cr = is.cr();
+        if (!cr) {
+            // a longer chord or rest that covers the input position
+            const ChordRest* prevCr = is.segment()->nextChordRest(is.track(), /*backwards*/ true, /*stopAtMeasureBoundary*/ true);
+            cr = prevCr && prevCr->endTick() > is.tick() ? prevCr : nullptr;
+        }
+        parent = cr ? cr->tuplet() : nullptr;
+        preview.tick = is.tick();
+        preview.space = (parent ? parent->tick() + parent->actualTicks() : is.segment()->measure()->endTick()) - preview.tick;
+        timeStretch = staff->timeStretch(preview.tick);
+    }
+
+    if (is.pendingTupletHere()) {
+        const PendingTuplet& pending = *is.pendingTuplet();
+        const TDuration duration = pendingTupletDuration(is);
+        TupletPreview::Level level;
+        TDuration baseLen;
+        if (!pendingTupletShape(pending, duration, level.ratio, baseLen)) {
+            return std::nullopt;
+        }
+        level.numberType = pending.numberType;
+        level.ticks = actualTicks(baseLen.fraction() * level.ratio.denominator(), parent, timeStretch);
+        preview.levels.push_back(level);
+        preview.fits = pendingTupletFits(score, duration);
+        // in By note name input, its size is already known
+        preview.waiting = !pending.duration;
+        preview.inserts = is.usingNoteEntryMethod(NoteEntryMethod::TIMEWISE) && !is.beyondScore();
+        return preview;
+    }
+
+    if (!is.stickyTuplet() || !is.stickyTupletsAllowed() || !is.stickyTupletContinues()) {
+        return std::nullopt;
+    }
+
+    // like addStickyTuplets: the levels of the sticky tuplet that aren't here yet, from the outermost one in
+    const StickyTuplet& sticky = *is.stickyTuplet();
+    if (parent && !sticky.startsWith(parent)) {
+        return std::nullopt;
+    }
+    size_t level = 0;
+    for (const Tuplet* t = parent; t; t = t->tuplet()) {
+        ++level;
+    }
+    if (level >= sticky.levels.size()) {
+        return std::nullopt;
+    }
+
+    Fraction factor = actualTicks(Fraction(1, 1), parent, timeStretch);
+    for (; level < sticky.levels.size(); ++level) {
+        const StickyTuplet::Level& l = sticky.levels[level];
+        const Fraction ticks = l.baseLen.fraction() * l.ratio.denominator() * factor;
+        preview.levels.push_back({ l.ratio, l.numberType, ticks });
+        factor /= l.ratio;
+    }
+    // nothing can be entered until the user ends sticky tuplet input; in Insert input, its time is inserted
+    preview.inserts = is.usingNoteEntryMethod(NoteEntryMethod::TIMEWISE) && stickyTupletInsertsHere(is);
+    preview.fits = nextStickyTupletFits(score, is);
+
+    return preview;
+}
+
+//---------------------------------------------------------
 //   addPendingTuplet
 //    Create the tuplet waiting at the input position. In By
 //    duration and Rhythm input, the input duration sizes it

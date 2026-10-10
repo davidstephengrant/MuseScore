@@ -22,6 +22,7 @@
 
 #pragma once
 
+#include <optional>
 #include <set>
 #include <vector>
 #include <utility>
@@ -47,11 +48,33 @@ struct PendingTuplet;
 struct Position;
 
 enum class AccidentalType : unsigned char;
+enum class TupletNumberType : unsigned char;
 enum class SymId;
 
 struct NoteInputParams {
     int step = 0;
     int drumPitch = -1;
+};
+
+// the tuplets that the next note or rest creates
+struct TupletPreview {
+    struct Level {
+        Fraction ratio;
+        TupletNumberType numberType {};
+        // in score time
+        Fraction ticks;
+    };
+
+    Fraction tick;
+    // from the outermost to the innermost
+    std::vector<Level> levels;
+    // for the outermost: up to the barline or the end of the tuplet it is in
+    Fraction space;
+    bool fits = true;
+    // waiting for the duration that sizes it: its length isn't known yet
+    bool waiting = false;
+    // in Insert input: its time is inserted, so it runs over the music after it
+    bool inserts = false;
 };
 
 class NoteInput
@@ -105,6 +128,7 @@ public:
     static bool canAddPendingTuplet(const Score* score, DurationType duration);
     static bool setPendingTuplet(Score* score, PendingTuplet pending);
     static bool addPendingTupletForNote(Transaction& tx, Score* score, track_idx_t track, bool insertTime = false);
+    static std::optional<TupletPreview> tupletPreview(const Score* score);
     static void toggleRest(Transaction& tx, Score* score);
     static void toggleDots(Transaction& tx, Score* score, int dots, bool toggleForSelectionOnly = false);
     static void increaseDuration(Transaction& tx, Score* score);

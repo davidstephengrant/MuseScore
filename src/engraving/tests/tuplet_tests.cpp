@@ -5773,3 +5773,329 @@ TEST_F(Engraving_TupletTests, stickyTupletDotPreviousNote)
         delete score;
     }
 }
+
+//-----------------------------------------
+//    tupletPreview
+//     the tuplet that the next note or rest creates, shown while
+//     note input waits
+//-----------------------------------------
+
+TEST_F(Engraving_TupletTests, tupletPreviewPending)
+{
+    MasterScore* score = pendingTupletScore();
+    ASSERT_TRUE(score);
+    InputState& is = score->inputState();
+
+    // nothing waits
+    EXPECT_FALSE(NoteInput::tupletPreview(score));
+
+    // a quarter triplet, sized by the input duration
+    setPendingTriplet(score, true);
+    std::optional<TupletPreview> preview = NoteInput::tupletPreview(score);
+    ASSERT_TRUE(preview);
+    EXPECT_EQ(preview->tick, Fraction(0, 1));
+    EXPECT_EQ(preview->levels.back().ratio, Fraction(3, 2));
+    EXPECT_EQ(preview->levels.back().ticks, Fraction(1, 2));
+    EXPECT_EQ(preview->space, Fraction(1, 1));
+    EXPECT_TRUE(preview->fits);
+    // its length depends on the next duration
+    EXPECT_TRUE(preview->waiting);
+
+    // choosing another duration resizes it
+    is.setDuration(DurationType::V_EIGHTH);
+    preview = NoteInput::tupletPreview(score);
+    ASSERT_TRUE(preview);
+    EXPECT_EQ(preview->levels.back().ticks, Fraction(1, 4));
+
+    // dividing the duration
+    is.setPendingTuplet(std::nullopt);
+    is.setDuration(DurationType::V_HALF);
+    setPendingTriplet(score, false);
+    preview = NoteInput::tupletPreview(score);
+    ASSERT_TRUE(preview);
+    EXPECT_EQ(preview->levels.back().ticks, Fraction(1, 2));
+
+    delete score;
+}
+
+TEST_F(Engraving_TupletTests, tupletPreviewPendingNoteName)
+{
+    MasterScore* score = pendingTupletScore(NoteEntryMethod::BY_NOTE_NAME);
+    ASSERT_TRUE(score);
+    InputState& is = score->inputState();
+
+    // in By note name input, an eighth triplet: its length is known while it waits
+    is.setDuration(DurationType::V_EIGHTH);
+    ASSERT_TRUE(waitForTuplet(score, true));
+    std::optional<TupletPreview> preview = NoteInput::tupletPreview(score);
+    ASSERT_TRUE(preview);
+    EXPECT_EQ(preview->levels.back().ticks, Fraction(1, 4));
+    EXPECT_TRUE(preview->fits);
+    EXPECT_FALSE(preview->waiting);
+
+    // another duration is for the first note: the tuplet stays the same
+    is.setDuration(DurationType::V_HALF);
+    preview = NoteInput::tupletPreview(score);
+    ASSERT_TRUE(preview);
+    EXPECT_EQ(preview->levels.back().ticks, Fraction(1, 4));
+
+    delete score;
+}
+
+TEST_F(Engraving_TupletTests, tupletPreviewPendingDoesNotFit)
+{
+    MasterScore* score = pendingTupletScore();
+    ASSERT_TRUE(score);
+    InputState& is = score->inputState();
+
+    // on beat 4, a quarter triplet would cross the barline, an eighth triplet fits
+    pressDuration(score, DurationType::V_HALF);
+    pressDuration(score, DurationType::V_QUARTER);
+    setPendingTriplet(score, true);
+    std::optional<TupletPreview> preview = NoteInput::tupletPreview(score);
+    ASSERT_TRUE(preview);
+    EXPECT_EQ(preview->tick, Fraction(3, 4));
+    EXPECT_EQ(preview->levels.back().ticks, Fraction(1, 2));
+    EXPECT_EQ(preview->space, Fraction(1, 4));
+    EXPECT_FALSE(preview->fits);
+
+    is.setDuration(DurationType::V_EIGHTH);
+    preview = NoteInput::tupletPreview(score);
+    ASSERT_TRUE(preview);
+    EXPECT_TRUE(preview->fits);
+
+    delete score;
+}
+
+TEST_F(Engraving_TupletTests, tupletPreviewSticky)
+{
+    MasterScore* score = stickyTupletScore();
+    ASSERT_TRUE(score);
+
+    // inside a sticky tuplet, the next note goes into it
+    EXPECT_FALSE(NoteInput::tupletPreview(score));
+
+    // straight after it, the next sticky tuplet
+    for (int i = 0; i < 3; ++i) {
+        enterNote(score);
+    }
+    std::optional<TupletPreview> preview = NoteInput::tupletPreview(score);
+    ASSERT_TRUE(preview);
+    EXPECT_EQ(preview->tick, Fraction(1, 4));
+    EXPECT_EQ(preview->levels.back().ratio, Fraction(3, 2));
+    EXPECT_EQ(preview->levels.back().numberType, TupletNumberType::SHOW_NUMBER);
+    EXPECT_EQ(preview->levels.back().ticks, Fraction(1, 4));
+    EXPECT_EQ(preview->space, Fraction(3, 4));
+    EXPECT_TRUE(preview->fits);
+    EXPECT_FALSE(preview->waiting);
+
+    // a tuplet waiting there comes first
+    setPendingTriplet(score, true);
+    score->inputState().setDuration(DurationType::V_QUARTER);
+    preview = NoteInput::tupletPreview(score);
+    ASSERT_TRUE(preview);
+    EXPECT_EQ(preview->levels.back().ticks, Fraction(1, 2));
+
+    delete score;
+}
+
+TEST_F(Engraving_TupletTests, tupletPreviewStickyNoRoom)
+{
+    MasterScore* score = stickyTupletScore(NoteEntryMethod::BY_NOTE_NAME, false);
+    ASSERT_TRUE(score);
+
+    // a sticky triplet up to 7/8: the next one doesn't fit, so it is shown up to the barline
+    for (int i = 0; i < 5; ++i) {
+        enterNote(score);
+    }
+    startStickyTuplet(score, Fraction(5, 8));
+    for (int i = 0; i < 3; ++i) {
+        enterNote(score);
+    }
+    EXPECT_EQ(score->inputState().tick(), Fraction(7, 8));
+    std::optional<TupletPreview> preview = NoteInput::tupletPreview(score);
+    ASSERT_TRUE(preview);
+    ASSERT_EQ(preview->levels.size(), 1u);
+    EXPECT_EQ(preview->levels[0].ticks, Fraction(1, 4));
+    EXPECT_EQ(preview->space, Fraction(1, 8));
+    EXPECT_FALSE(preview->fits);
+
+    delete score;
+}
+
+TEST_F(Engraving_TupletTests, tupletPreviewStickyInsert)
+{
+    // in Insert input, the next sticky tuplet's time is inserted: it fits even at the barline
+    MasterScore* score = pendingTupletInsertScore(Fraction(3, 4));
+    ASSERT_TRUE(score);
+    InputState& is = score->inputState();
+    is.setDuration(DurationType::V_QUARTER);
+    is.resumeStickyTuplet(StickyTuplet { { QUARTER_TRIPLET } });
+    std::optional<TupletPreview> preview = NoteInput::tupletPreview(score);
+    ASSERT_TRUE(preview);
+    EXPECT_TRUE(preview->inserts);
+    EXPECT_TRUE(preview->fits);
+    delete score;
+
+    // but not where inserting time would split voice 2's triplet
+    score = pendingTupletScore(NoteEntryMethod::BY_NOTE_NAME);
+    ASSERT_TRUE(score);
+    InputState& is2 = score->inputState();
+    for (int pitch : { 60, 62, 64, 65 }) {
+        enterNote(score, pitch);
+    }
+    is2.setTrack(1);
+    is2.setSegment(score->tick2segment(Fraction(0, 1), false, SegmentType::ChordRest));
+    ASSERT_TRUE(waitForTuplet(score, true));
+    for (int i = 0; i < 3; ++i) {
+        enterNote(score, 55);
+    }
+    is2.setTrack(0);
+    is2.setNoteEntryMethod(NoteEntryMethod::TIMEWISE);
+    is2.setSegment(score->tick2segment(Fraction(1, 4), false, SegmentType::ChordRest));
+    is2.setDuration(DurationType::V_EIGHTH);
+    is2.resumeStickyTuplet(StickyTuplet { { EIGHTH_TRIPLET } });
+    preview = NoteInput::tupletPreview(score);
+    ASSERT_TRUE(preview);
+    EXPECT_TRUE(preview->inserts);
+    EXPECT_FALSE(preview->fits);
+    delete score;
+}
+
+TEST_F(Engraving_TupletTests, tupletPreviewStickyNested)
+{
+    MasterScore* score = stickyTupletScore(NoteEntryMethod::BY_NOTE_NAME, false);
+    ASSERT_TRUE(score);
+
+    // eighth triplets nested in a quarter triplet
+    const Tuplet* inner = nullptr;
+    score->transactionManager()->transaction(TranslatableString::untranslatable("Sticky tuplet tests"), [&](Transaction&) {
+        ASSERT_TRUE(score->addTuplet(stickyCrAt(score, Fraction(0, 1)), Fraction(3, 2), TDuration(DurationType::V_QUARTER),
+                                     TupletNumberType::SHOW_NUMBER, TupletBracketType::AUTO_BRACKET));
+        inner = score->addTuplet(stickyCrAt(score, Fraction(0, 1)), Fraction(3, 2), TDuration(DurationType::V_EIGHTH),
+                                 TupletNumberType::SHOW_RELATION, TupletBracketType::AUTO_BRACKET);
+    });
+    ASSERT_TRUE(inner);
+    InputState& is = score->inputState();
+    is.setStickyTuplet(StickyTuplet::of(inner));
+
+    // after the first inner triplet, only the next inner one: the outer triplet is already there
+    is.setSegment(score->tick2segment(Fraction(1, 6), false, SegmentType::ChordRest));
+    std::optional<TupletPreview> preview = NoteInput::tupletPreview(score);
+    ASSERT_TRUE(preview);
+    EXPECT_EQ(preview->tick, Fraction(1, 6));
+    ASSERT_EQ(preview->levels.size(), 1u);
+    EXPECT_EQ(preview->levels[0].numberType, TupletNumberType::SHOW_RELATION);
+    EXPECT_EQ(preview->levels[0].ticks, Fraction(1, 6));
+    EXPECT_EQ(preview->space, Fraction(1, 3));
+    EXPECT_TRUE(preview->fits);
+
+    // after the outer triplet, the whole structure again
+    is.setSegment(score->tick2segment(Fraction(1, 2), false, SegmentType::ChordRest));
+    preview = NoteInput::tupletPreview(score);
+    ASSERT_TRUE(preview);
+    EXPECT_EQ(preview->tick, Fraction(1, 2));
+    ASSERT_EQ(preview->levels.size(), 2u);
+    EXPECT_EQ(preview->levels[0].ratio, Fraction(3, 2));
+    EXPECT_EQ(preview->levels[0].numberType, TupletNumberType::SHOW_NUMBER);
+    EXPECT_EQ(preview->levels[0].ticks, Fraction(1, 2));
+    EXPECT_EQ(preview->levels[1].numberType, TupletNumberType::SHOW_RELATION);
+    EXPECT_EQ(preview->levels[1].ticks, Fraction(1, 6));
+    EXPECT_EQ(preview->space, Fraction(1, 2));
+
+    delete score;
+}
+
+TEST_F(Engraving_TupletTests, tupletPreviewPendingDotted)
+{
+    for (int dots : { 1, 2 }) {
+        MasterScore* score = pendingTupletScore();
+        ASSERT_TRUE(score);
+        InputState& is = score->inputState();
+
+        // a dotted or double-dotted eighth triplet
+        TDuration eighth(DurationType::V_EIGHTH);
+        eighth.setDots(dots);
+        is.setDuration(eighth);
+        setPendingTriplet(score, true);
+        std::optional<TupletPreview> preview = NoteInput::tupletPreview(score);
+        ASSERT_TRUE(preview);
+        EXPECT_EQ(preview->levels.back().ticks, dots == 1 ? Fraction(3, 8) : Fraction(7, 16));
+        EXPECT_TRUE(preview->fits);
+
+        // a dotted or double-dotted half divided
+        is.setPendingTuplet(std::nullopt);
+        TDuration half(DurationType::V_HALF);
+        half.setDots(dots);
+        is.setDuration(half);
+        setPendingTriplet(score, false);
+        preview = NoteInput::tupletPreview(score);
+        ASSERT_TRUE(preview);
+        EXPECT_EQ(preview->levels.back().ratio, dots == 1 ? Fraction(3, 3) : Fraction(3, 7));
+        EXPECT_EQ(preview->levels.back().ticks, dots == 1 ? Fraction(3, 4) : Fraction(7, 8));
+        EXPECT_TRUE(preview->fits);
+
+        delete score;
+    }
+}
+
+TEST_F(Engraving_TupletTests, tupletPreviewPendingInsideLongerChordRestInTuplet)
+{
+    MasterScore* score = pendingTupletScore();
+    ASSERT_TRUE(score);
+    InputState& is = score->inputState();
+
+    // a quarter triplet on beats 1 and 2, and the tuplet waits on beat 2, inside its second quarter
+    setPendingTriplet(score, true);
+    for (int i = 0; i < 3; ++i) {
+        pressDuration(score, DurationType::V_QUARTER);
+    }
+    enterVoice2Quarters(score);
+    is.setSegment(score->tick2segment(Fraction(1, 4), false, SegmentType::ChordRest));
+    ASSERT_FALSE(is.cr());
+    setPendingTriplet(score, true);
+
+    // an eighth triplet inside the quarter triplet, up to its end
+    is.setDuration(DurationType::V_EIGHTH);
+    std::optional<TupletPreview> preview = NoteInput::tupletPreview(score);
+    ASSERT_TRUE(preview);
+    EXPECT_EQ(preview->tick, Fraction(1, 4));
+    EXPECT_EQ(preview->levels.back().ticks, Fraction(1, 6));
+    EXPECT_EQ(preview->space, Fraction(1, 4));
+    EXPECT_TRUE(preview->fits);
+
+    // a quarter triplet doesn't fit there
+    is.setDuration(DurationType::V_QUARTER);
+    preview = NoteInput::tupletPreview(score);
+    ASSERT_TRUE(preview);
+    EXPECT_EQ(preview->levels.back().ticks, Fraction(1, 3));
+    EXPECT_FALSE(preview->fits);
+
+    delete score;
+}
+
+TEST_F(Engraving_TupletTests, tupletPreviewStickyDotted)
+{
+    for (int dots : { 1, 2 }) {
+        MasterScore* score = pendingTupletScore();
+        ASSERT_TRUE(score);
+        InputState& is = score->inputState();
+
+        // after a sticky dotted or double-dotted eighth triplet, the next one
+        is.setDots(dots);
+        setPendingStickyTriplet(score);
+        for (int i = 0; i < 3; ++i) {
+            pressDuration(score, DurationType::V_EIGHTH);
+        }
+        const Fraction length = dots == 1 ? Fraction(3, 8) : Fraction(7, 16);
+        std::optional<TupletPreview> preview = NoteInput::tupletPreview(score);
+        ASSERT_TRUE(preview);
+        EXPECT_EQ(preview->tick, length);
+        ASSERT_EQ(preview->levels.size(), 1u);
+        EXPECT_EQ(preview->levels[0].ticks, length);
+        EXPECT_EQ(preview->space, Fraction(1, 1) - length);
+        EXPECT_TRUE(preview->fits);
+
+        delete score;
+    }
+}

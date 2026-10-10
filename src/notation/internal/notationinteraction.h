@@ -31,6 +31,7 @@
 #include "interactive/iinteractive.h"
 #include "engraving/rendering/isinglerenderer.h"
 #include "engraving/rendering/ieditmoderenderer.h"
+#include "engraving/iengravingconfiguration.h"
 
 #include "../inotationinteraction.h"
 #include "../inotationconfiguration.h"
@@ -65,6 +66,7 @@ class NotationInteraction : public INotationInteraction, public IInteractionForS
     public muse::async::Asyncable
 {
     muse::GlobalInject<INotationConfiguration> configuration;
+    muse::GlobalInject<engraving::IEngravingConfiguration> engravingConfiguration;
     muse::GlobalInject<engraving::rendering::ISingleRenderer> engravingRenderer;
     muse::GlobalInject<engraving::rendering::IEditModeRenderer> editModeRenderer;
     muse::ContextInject<INotationContextConfiguration> contextConfiguration = { this };
@@ -452,6 +454,7 @@ private:
 
     bool shouldDrawInputPreview() const;
     void drawInputPreview(muse::draw::Painter* painter, const engraving::rendering::PaintOptions& opt);
+    void drawTupletPreview(muse::draw::Painter* painter, const engraving::rendering::PaintOptions& opt, const muse::RectF& previewRect);
 
     void drawAnchorLines(muse::draw::Painter* painter);
     void drawTextEditMode(muse::draw::Painter* painter, const engraving::rendering::PaintOptions& opt);
