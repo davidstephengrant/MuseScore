@@ -50,6 +50,9 @@ void MScoreErrorsController::checkAndShowMScoreError()
                                                                        "Choose a shorter duration, or press Escape to cancel it."));
         } else if (err == MsError::TUPLET_NOTE_VALUE_TOO_SHORT) {
             accessibilityController()->announce(muse::mtrc("notation", "Cannot create tuplet: note value is too short"));
+        } else if (err == MsError::NO_SPACE_FOR_PENDING_TUPLET) {
+            accessibilityController()->announce(muse::mtrc("notation", "No space for the tuplet. Choose a shorter duration and "
+                                                                       "the tuplet command again, or press Escape to cancel the tuplet."));
         }
         return;
     }
