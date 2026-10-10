@@ -1543,6 +1543,16 @@ void NotationActionController::putTuplet(const TupletOptions& options, bool canW
     }
 
     if (noteInput->isNoteInputMode()) {
+        // in By note name input, the tuplet waits for the next note
+        if (canWait && configuration()->tupletsWaitForNextDuration() && noteInput->usingNoteInputMethod(NoteInputMethod::BY_NOTE_NAME)) {
+            if (!options.selectedDurationAsNoteValue && !interaction->canAddTupletToSelectedChordRests()) {
+                engraving::MScore::setError(engraving::MsError::TUPLET_NOTE_VALUE_TOO_SHORT);
+            } else if (!noteInput->setPendingTuplet(options)) {
+                engraving::MScore::setError(engraving::MsError::NO_SPACE_FOR_TUPLET);
+            }
+            interaction->checkAndShowError();
+            return;
+        }
         noteInput->addTuplet(options);
     } else {
         interaction->addTupletToSelectedChordRests(options);

@@ -71,7 +71,7 @@ public:
     void addTuplet(const TupletOptions& options) override;
 
     bool tupletPending() const override;
-    void setPendingTuplet(const TupletOptions& options) override;
+    bool setPendingTuplet(const TupletOptions& options) override;
     void cancelPendingTuplet() override;
     void forgetPendingTuplets() override;
 

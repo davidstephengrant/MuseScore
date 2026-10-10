@@ -159,8 +159,8 @@ public:
     virtual void setTupletShortcutsUseSelectedDuration(bool use) = 0;
     virtual muse::async::Notification tupletShortcutsUseSelectedDurationChanged() const = 0;
 
-    // whether, in By duration and Rhythm input, the tuplet commands wait for the next duration
-    // rather than using the current input duration straight away
+    // whether, during note input, the tuplet commands wait for the next note (By note name) or
+    // duration (By duration and Rhythm) rather than adding the tuplet straight away
     virtual bool tupletsWaitForNextDuration() const = 0;
     virtual void setTupletsWaitForNextDuration(bool wait) = 0;
     virtual muse::async::Notification tupletsWaitForNextDurationChanged() const = 0;

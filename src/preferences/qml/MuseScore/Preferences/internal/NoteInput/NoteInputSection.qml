@@ -103,7 +103,7 @@ BaseSection {
     }
 
     ComboBoxWithTitle {
-        title: qsTrc("preferences", "Tuplets in Input by duration mode")
+        title: qsTrc("preferences", "Tuplets during note input")
 
         controlWidth: 300
 
@@ -112,8 +112,8 @@ BaseSection {
         navigationRow: 3
 
         model: [
-            { text: qsTrc("preferences", "Wait for the next duration"), value: 0 },
-            { text: qsTrc("preferences", "Use the selected duration"), value: 1 },
+            { text: qsTrc("preferences", "Wait for the next note or duration"), value: 0 },
+            { text: qsTrc("preferences", "Add straight away"), value: 1 },
         ]
 
         currentIndex: root.tupletsWaitForNextDuration ? 0 : 1

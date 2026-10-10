@@ -803,8 +803,13 @@ void NotationNoteInput::addTuplet(const TupletOptions& options)
 
 static String pendingTupletAnnouncement(const PendingTuplet& pending)
 {
+    const String type = Tuplet::typeUserName(pending.ratio.numerator());
+    if (pending.duration) {
+        //: %1 is a tuplet type, e.g. "Triplet"
+        return muse::mtrc("notation", "%1 waiting for a note").arg(type);
+    }
     //: %1 is a tuplet type, e.g. "Triplet"
-    return muse::mtrc("notation", "%1 waiting for a duration").arg(Tuplet::typeUserName(pending.ratio.numerator()));
+    return muse::mtrc("notation", "%1 waiting for a duration").arg(type);
 }
 
 bool NotationNoteInput::tupletPending() const
@@ -812,7 +817,7 @@ bool NotationNoteInput::tupletPending() const
     return isNoteInputMode() && score()->inputState().pendingTupletHere();
 }
 
-void NotationNoteInput::setPendingTuplet(const TupletOptions& options)
+bool NotationNoteInput::setPendingTuplet(const TupletOptions& options)
 {
     NoteInputState& is = score()->inputState();
 
@@ -822,14 +827,22 @@ void NotationNoteInput::setPendingTuplet(const TupletOptions& options)
     pending.bracketType = options.bracketType;
     pending.autoBaseLen = options.autoBaseLen;
     pending.durationAsNoteValue = options.selectedDurationAsNoteValue;
-    pending.tick = is.tick();
-    pending.track = is.track();
-    pending.beyondScore = is.beyondScore();
-    is.setPendingTuplet(pending);
+    if (is.usingNoteEntryMethod(NoteEntryMethod::BY_NOTE_NAME)) {
+        // the input duration sizes it now
+        if (!NoteInput::setPendingTuplet(score(), pending)) {
+            return false;
+        }
+    } else {
+        pending.tick = is.tick();
+        pending.track = is.track();
+        pending.beyondScore = is.beyondScore();
+        is.setPendingTuplet(pending);
+    }
 
     m_tupletWasPending = true;
-    accessibilityController()->announce(pendingTupletAnnouncement(pending));
+    accessibilityController()->announce(pendingTupletAnnouncement(*is.pendingTuplet()));
     notifyAboutStateChanged();
+    return true;
 }
 
 void NotationNoteInput::cancelPendingTuplet()
