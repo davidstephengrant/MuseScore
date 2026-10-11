@@ -53,6 +53,9 @@ void MScoreErrorsController::checkAndShowMScoreError()
         } else if (err == MsError::NO_SPACE_FOR_PENDING_TUPLET) {
             accessibilityController()->announce(muse::mtrc("notation", "No space for the tuplet. Choose a shorter duration and "
                                                                        "the tuplet command again, or press Escape to cancel the tuplet."));
+        } else if (err == MsError::CANNOT_INSERT_TUPLET_IN_TUPLET) {
+            accessibilityController()->announce(muse::mtrc("notation", "Cannot create tuplet: a tuplet can’t be inserted "
+                                                                       "inside another tuplet"));
         }
         return;
     }
@@ -207,6 +210,10 @@ void MScoreErrorsController::checkAndShowMScoreError()
         message = muse::trc("notation", "There isn’t enough space for the tuplet before the end of the measure "
                                         "(or of the tuplet it would be nested in). Choose a shorter duration and "
                                         "the tuplet command again, or press Escape to cancel the tuplet.");
+        break;
+    case MsError::CANNOT_INSERT_TUPLET_IN_TUPLET:
+        title = muse::trc("notation", "Cannot create tuplet");
+        message = muse::trc("notation", "A tuplet can’t be inserted inside another tuplet.");
         break;
     }
 
