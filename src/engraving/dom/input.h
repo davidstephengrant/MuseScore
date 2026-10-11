@@ -64,8 +64,8 @@ enum class NoteEntryMethod : char {
 //    A tuplet asked for during note input. It waits at the
 //    input position where it was asked for, and is added with
 //    the next note or rest. In By duration and Rhythm input,
-//    the next duration sizes it; in By note name input, the
-//    input duration when it was asked for.
+//    the next duration sizes it; in By note name and Insert
+//    input, the input duration when it was asked for.
 //---------------------------------------------------------
 
 struct PendingTuplet {
@@ -75,7 +75,7 @@ struct PendingTuplet {
     bool autoBaseLen = false;
     // the duration is the subdivision, rather than the length divided
     bool durationAsSubdivision = false;
-    // By note name: the duration that sizes the tuplet; otherwise the next duration does
+    // By note name and Insert: the duration that sizes the tuplet; otherwise the next duration does
     std::optional<TDuration> duration;
     // given when it starts waiting, see InputState::forgetPendingTuplets()
     int number = 0;
@@ -142,10 +142,10 @@ public:
     void setBeamMode(BeamMode m) { m_beamMode = m; }
 
     bool noteEntryMode() const { return m_noteEntryMode; }
-    void setNoteEntryMode(bool v) { m_noteEntryMode = v; }
+    void setNoteEntryMode(bool v);
 
     NoteEntryMethod noteEntryMethod() const { return m_noteEntryMethod; }
-    void setNoteEntryMethod(NoteEntryMethod m) { m_noteEntryMethod = m; }
+    void setNoteEntryMethod(NoteEntryMethod m);
     bool usingNoteEntryMethod(NoteEntryMethod m) const { return m == noteEntryMethod(); }
 
     AccidentalType accidentalType() const { return m_accidentalType; }
@@ -163,6 +163,8 @@ public:
     void movePendingTupletHere();
     void forgetPendingTuplets();
     void restoreFromUndo(const InputState& state);
+    void setInsertedTuplet(const Tuplet* tuplet);
+    bool inInsertedTuplet(const ChordRest* cr) const;
 
     void update(Selection& selection);
     void moveInputPos(EngravingItem* e);
@@ -207,6 +209,8 @@ private:
     bool m_beyondScore = false;
 
     std::optional<PendingTuplet> m_pendingTuplet;
+    // Insert: where the tuplet that a waiting tuplet inserted starts
+    std::optional<std::pair<Fraction, track_idx_t> > m_insertedTuplet;
 
     // kept through undo and redo: the last number given to a waiting tuplet, and the last one cancelled
     int m_pendingTupletNumber = 0;

@@ -205,6 +205,53 @@ void InputState::restoreFromUndo(const InputState& state)
     }
 }
 
+//---------------------------------------------------------
+//   setNoteEntryMode
+//    Starting or ending note input, or changing the method,
+//    ends the filling of a tuplet that a waiting tuplet
+//    inserted
+//---------------------------------------------------------
+
+void InputState::setNoteEntryMode(bool v)
+{
+    if (v != m_noteEntryMode) {
+        m_insertedTuplet.reset();
+    }
+    m_noteEntryMode = v;
+}
+
+void InputState::setNoteEntryMethod(NoteEntryMethod m)
+{
+    if (m != m_noteEntryMethod) {
+        m_insertedTuplet.reset();
+    }
+    m_noteEntryMethod = m;
+}
+
+//---------------------------------------------------------
+//   setInsertedTuplet
+//    In Insert input, notes fill the rests of the tuplet that
+//    a waiting tuplet inserted, rather than inserting time
+//---------------------------------------------------------
+
+void InputState::setInsertedTuplet(const Tuplet* tuplet)
+{
+    m_insertedTuplet = tuplet ? std::optional(std::make_pair(tuplet->tick(), tuplet->track())) : std::nullopt;
+}
+
+//---------------------------------------------------------
+//   inInsertedTuplet
+//---------------------------------------------------------
+
+bool InputState::inInsertedTuplet(const ChordRest* cr) const
+{
+    const Tuplet* tuplet = cr ? cr->tuplet() : nullptr;
+    while (tuplet && tuplet->tuplet()) {
+        tuplet = tuplet->tuplet();
+    }
+    return tuplet && m_insertedTuplet && tuplet->tick() == m_insertedTuplet->first && tuplet->track() == m_insertedTuplet->second;
+}
+
 void InputState::setVoice(voice_idx_t v)
 {
     const Score* score = m_segment ? m_segment->score() : nullptr;
