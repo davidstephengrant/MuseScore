@@ -1542,6 +1542,23 @@ void NotationActionController::putTuplet(const TupletOptions& options, bool canW
         return;
     }
 
+    // in Insert input, the tuplet waits for the next note, which inserts the tuplet's time
+    if (canWait && configuration()->tupletsWaitForNextDuration() && noteInput->isNoteInputMode()
+        && noteInput->usingNoteInputMethod(NoteInputMethod::TIMEWISE)) {
+        if (!noteInput->setPendingTuplet(options)) {
+            const NoteInputState& state = noteInput->state();
+            if (state.beyondScore()) {
+                engraving::MScore::setError(engraving::MsError::NO_SPACE_FOR_TUPLET);
+            } else if (state.segment() && engraving::NoteInput::insertSplitsTuplet(state.segment())) {
+                engraving::MScore::setError(engraving::MsError::CANNOT_INSERT_TUPLET_IN_TUPLET);
+            } else {
+                engraving::MScore::setError(engraving::MsError::TUPLET_NOTE_VALUE_TOO_SHORT);
+            }
+            interaction->checkAndShowError();
+        }
+        return;
+    }
+
     if (noteInput->isNoteInputMode()) {
         // in By note name input, the tuplet waits for the next note
         if (canWait && configuration()->tupletsWaitForNextDuration() && noteInput->usingNoteInputMethod(NoteInputMethod::BY_NOTE_NAME)) {

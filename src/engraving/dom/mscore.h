@@ -160,6 +160,7 @@ enum class MsError : unsigned char {
     NO_SPACE_FOR_TUPLET,
     NOTE_VALUE_TUPLET_ON_SEVERAL_CHORD_RESTS,
     TUPLET_NOTE_VALUE_TOO_SHORT,
+    CANNOT_INSERT_TUPLET_IN_TUPLET,
 };
 
 /// \cond PLUGIN_API \private \endcond

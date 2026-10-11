@@ -827,7 +827,7 @@ bool NotationNoteInput::setPendingTuplet(const TupletOptions& options)
     pending.bracketType = options.bracketType;
     pending.autoBaseLen = options.autoBaseLen;
     pending.durationAsNoteValue = options.selectedDurationAsNoteValue;
-    if (is.usingNoteEntryMethod(NoteEntryMethod::BY_NOTE_NAME)) {
+    if (is.usingNoteEntryMethod(NoteEntryMethod::BY_NOTE_NAME) || is.usingNoteEntryMethod(NoteEntryMethod::TIMEWISE)) {
         // the input duration sizes it now
         if (!NoteInput::setPendingTuplet(score(), pending)) {
             return false;
