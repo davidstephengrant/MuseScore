@@ -80,12 +80,14 @@ public:
                                                       bool forceAccidental = false);
 
     static muse::Ret putNote(Transaction& tx, Score* score, const muse::PointF& pos, bool replace, bool insert);
-    static muse::Ret putNote(Transaction& tx, Score* score, const Position& pos, bool replace);
+    static muse::Ret putNote(Transaction& tx, Score* score, const Position& pos, bool replace, bool insert = false);
     static muse::Ret repitchNote(Transaction& tx, Score* score, const Position& pos, bool replace);
     static muse::Ret insertChordByInsertingTime(Transaction& tx, Score* score, const Position& pos);
     static Segment* insertTime(Transaction& tx, Score* score, Segment* seg, const Fraction& len);
+    static bool insertSplitsTuplet(const Segment* segment);
 
     static void truncateChordRest(Transaction& tx, Score* score, ChordRest* cr, const Fraction& tick, bool fillWithRest);
+    static Fraction insertedTupletDuration(const InputState& is, const Fraction& duration);
 
     static void nextInputPos(Transaction& tx, Score* score, const ChordRest* cr, bool doSelect);
 
@@ -97,7 +99,7 @@ public:
     static void setDuration(Transaction& tx, Score* score, DurationType duration);
     static bool canAddPendingTuplet(const Score* score, DurationType duration);
     static bool setPendingTuplet(Score* score, PendingTuplet pending);
-    static bool addPendingTupletForNote(Transaction& tx, Score* score, track_idx_t track);
+    static bool addPendingTupletForNote(Transaction& tx, Score* score, track_idx_t track, bool insertTime = false);
     static void toggleRest(Transaction& tx, Score* score);
     static void toggleDots(Transaction& tx, Score* score, int dots, bool toggleForSelectionOnly = false);
     static void increaseDuration(Transaction& tx, Score* score);
