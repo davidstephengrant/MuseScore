@@ -53,6 +53,10 @@ void TupletDialog::componentComplete()
 
     defaultToStyleSettings();
 
+    const bool useSelected = configuration()->tupletShortcutsUseSelectedDuration();
+    useSelectedDuration->setChecked(useSelected);
+    divideDuration->setChecked(!useSelected);
+
     numberGroupBox->setAccessibleName(formatGroupBox->title() + " " + numberGroupBox->title());
     bracketGroupBox->setAccessibleName(formatGroupBox->title() + " " + bracketGroupBox->title());
 

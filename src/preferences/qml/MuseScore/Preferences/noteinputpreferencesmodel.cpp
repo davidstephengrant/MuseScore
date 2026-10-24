@@ -41,6 +41,10 @@ void NoteInputPreferencesModel::load()
         emit addAccidentalDotsArticulationsToNextNoteEnteredChanged(addAccidentalDotsArticulationsToNextNoteEntered());
     });
 
+    notationConfiguration()->tupletShortcutsUseSelectedDurationChanged().onNotify(this, [this]() {
+        emit tupletShortcutsUseSelectedDurationChanged(tupletShortcutsUseSelectedDuration());
+    });
+
     notationConfiguration()->useNoteInputCursorInInputByDurationChanged().onNotify(this, [this]() {
         emit useNoteInputCursorInInputByDurationChanged(useNoteInputCursorInInputByDuration());
     });
@@ -145,6 +149,11 @@ bool NoteInputPreferencesModel::addAccidentalDotsArticulationsToNextNoteEntered(
     return notationConfiguration()->addAccidentalDotsArticulationsToNextNoteEntered();
 }
 
+bool NoteInputPreferencesModel::tupletShortcutsUseSelectedDuration() const
+{
+    return notationConfiguration()->tupletShortcutsUseSelectedDuration();
+}
+
 bool NoteInputPreferencesModel::useNoteInputCursorInInputByDuration() const
 {
     return notationConfiguration()->useNoteInputCursorInInputByDuration();
@@ -241,6 +250,15 @@ void NoteInputPreferencesModel::setAddAccidentalDotsArticulationsToNextNoteEnter
     }
 
     notationConfiguration()->setAddAccidentalDotsArticulationsToNextNoteEntered(value);
+}
+
+void NoteInputPreferencesModel::setTupletShortcutsUseSelectedDuration(bool value)
+{
+    if (value == tupletShortcutsUseSelectedDuration()) {
+        return;
+    }
+
+    notationConfiguration()->setTupletShortcutsUseSelectedDuration(value);
 }
 
 void NoteInputPreferencesModel::setUseNoteInputCursorInInputByDuration(bool value)

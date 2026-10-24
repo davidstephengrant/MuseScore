@@ -153,6 +153,12 @@ public:
     virtual void setAddAccidentalDotsArticulationsToNextNoteEntered(bool value) = 0;
     virtual muse::async::Notification addAccidentalDotsArticulationsToNextNoteEnteredChanged() const = 0;
 
+    // whether the tuplet shortcuts (duplet to nonuplet) use the selected duration as the note value,
+    // rather than dividing it (see TupletOptions::selectedDurationAsNoteValue)
+    virtual bool tupletShortcutsUseSelectedDuration() const = 0;
+    virtual void setTupletShortcutsUseSelectedDuration(bool use) = 0;
+    virtual muse::async::Notification tupletShortcutsUseSelectedDurationChanged() const = 0;
+
     virtual muse::io::path_t userMusicFontsPath() const = 0;
     virtual void setUserMusicFontsPath(const muse::io::path_t& path) = 0;
     virtual muse::async::Channel<muse::io::path_t> userMusicFontsPathChanged() const = 0;

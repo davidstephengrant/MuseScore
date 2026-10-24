@@ -139,6 +139,10 @@ public:
     MOCK_METHOD(void, setAddAccidentalDotsArticulationsToNextNoteEntered, (bool), (override));
     MOCK_METHOD(muse::async::Notification, addAccidentalDotsArticulationsToNextNoteEnteredChanged, (), (const, override));
 
+    MOCK_METHOD(bool, tupletShortcutsUseSelectedDuration, (), (const, override));
+    MOCK_METHOD(void, setTupletShortcutsUseSelectedDuration, (bool), (override));
+    MOCK_METHOD(muse::async::Notification, tupletShortcutsUseSelectedDurationChanged, (), (const, override));
+
     MOCK_METHOD(muse::io::path_t, userMusicFontsPath, (), (const, override));
     MOCK_METHOD(void, setUserMusicFontsPath, (const muse::io::path_t&), (override));
     MOCK_METHOD(muse::async::Channel<muse::io::path_t>, userMusicFontsPathChanged, (), (const, override));

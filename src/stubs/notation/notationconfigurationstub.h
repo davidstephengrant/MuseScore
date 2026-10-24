@@ -143,6 +143,10 @@ public:
     void setAddAccidentalDotsArticulationsToNextNoteEntered(bool value) override;
     muse::async::Notification addAccidentalDotsArticulationsToNextNoteEnteredChanged() const override;
 
+    bool tupletShortcutsUseSelectedDuration() const override;
+    void setTupletShortcutsUseSelectedDuration(bool use) override;
+    muse::async::Notification tupletShortcutsUseSelectedDurationChanged() const override;
+
     muse::io::path_t userMusicFontsPath() const override;
     void setUserMusicFontsPath(const muse::io::path_t& path) override;
     muse::async::Channel<muse::io::path_t> userMusicFontsPathChanged() const override;

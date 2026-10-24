@@ -402,6 +402,21 @@ muse::async::Notification NotationConfigurationStub::addAccidentalDotsArticulati
     return n;
 }
 
+bool NotationConfigurationStub::tupletShortcutsUseSelectedDuration() const
+{
+    return false;
+}
+
+void NotationConfigurationStub::setTupletShortcutsUseSelectedDuration(bool)
+{
+}
+
+muse::async::Notification NotationConfigurationStub::tupletShortcutsUseSelectedDurationChanged() const
+{
+    static muse::async::Notification n;
+    return n;
+}
+
 muse::io::path_t NotationConfigurationStub::userMusicFontsPath() const
 {
     return muse::io::path_t();
