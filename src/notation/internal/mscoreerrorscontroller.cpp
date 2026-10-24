@@ -194,6 +194,10 @@ void MScoreErrorsController::checkAndShowMScoreError()
                                         "to one note or rest at a time (or one per staff). "
                                         "Select a single note or rest and try again.");
         break;
+    case MsError::TUPLET_NOTE_VALUE_TOO_SHORT:
+        title = muse::trc("notation", "Cannot create tuplet");
+        message = muse::trc("notation", "Note value is too short");
+        break;
     }
 
     m_currentDialogError = err;

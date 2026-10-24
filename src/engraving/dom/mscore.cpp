@@ -125,6 +125,7 @@ std::string MScore::errorToString(MsError err)
     case MsError::CANNOT_EXPLODE_IMPLODE_LOCAL_TIMESIG: return "CANNOT_EXPLODE_IMPLODE_LOCAL_TIMESIG";
     case MsError::NO_SPACE_FOR_TUPLET: return "NO_SPACE_FOR_TUPLET";
     case MsError::NOTE_VALUE_TUPLET_ON_SEVERAL_CHORD_RESTS: return "NOTE_VALUE_TUPLET_ON_SEVERAL_CHORD_RESTS";
+    case MsError::TUPLET_NOTE_VALUE_TOO_SHORT: return "TUPLET_NOTE_VALUE_TOO_SHORT";
     }
 
     return {};
