@@ -22,6 +22,7 @@
 
 #pragma once
 
+#include <optional>
 #include <set>
 #include <vector>
 #include <utility>
@@ -46,11 +47,24 @@ struct NoteVal;
 struct Position;
 
 enum class AccidentalType : unsigned char;
+enum class TupletNumberType : unsigned char;
 enum class SymId;
 
 struct NoteInputParams {
     int step = 0;
     int drumPitch = -1;
+};
+
+// the tuplet waiting at the input position
+struct TupletPreview {
+    struct Level {
+        Fraction ratio;
+        TupletNumberType numberType {};
+    };
+
+    Fraction tick;
+    // from the outermost to the innermost
+    std::vector<Level> levels;
 };
 
 class NoteInput
@@ -94,6 +108,7 @@ public:
 
     static void setDuration(Transaction& tx, Score* score, DurationType duration);
     static bool canAddPendingTuplet(const Score* score, DurationType duration);
+    static std::optional<TupletPreview> tupletPreview(const Score* score);
     static void toggleRest(Transaction& tx, Score* score);
     static void toggleDots(Transaction& tx, Score* score, int dots, bool toggleForSelectionOnly = false);
     static void increaseDuration(Transaction& tx, Score* score);

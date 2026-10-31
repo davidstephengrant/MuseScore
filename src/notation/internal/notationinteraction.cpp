@@ -93,6 +93,7 @@
 #include "engraving/dom/stafftype.h"
 #include "engraving/dom/stafftypechange.h"
 #include "engraving/dom/system.h"
+#include "engraving/dom/text.h"
 #include "engraving/dom/tuplet.h"
 #include "engraving/dom/utils.h"
 #include "engraving/editing/editbeam.h"
@@ -433,6 +434,8 @@ void NotationInteraction::paint(Painter* painter, const engraving::rendering::Pa
 
     if (shouldDrawInputPreview()) {
         drawInputPreview(painter, opt);
+    } else if (m_noteInput->isNoteInputMode()) {
+        drawTupletPreview(painter, opt, RectF());
     }
 
     score()->renderer()->drawItem(score()->shadowNote(), painter, opt);
@@ -3604,7 +3607,126 @@ void NotationInteraction::drawInputPreview(Painter* painter, const engraving::re
         }
     }
 
+    RectF previewRect;
+    for (const ShadowNote* preview : previewList) {
+        previewRect.unite(preview->ldata()->bbox().translated(preview->pos()));
+    }
+    drawTupletPreview(painter, opt, previewRect);
+
     DeleteAll(previewList);
+}
+
+void NotationInteraction::drawTupletPreview(Painter* painter, const engraving::rendering::PaintOptions& opt, const RectF& previewRect)
+{
+    const std::optional<TupletPreview> tuplet = NoteInput::tupletPreview(score());
+    if (!tuplet || tuplet->levels.empty()) {
+        return;
+    }
+
+    const InputState& is = score()->inputState();
+    const Measure* measure = is.segment()->measure();
+    const System* system = measure->system();
+    const SysStaff* sysStaff = system ? system->staff(is.staffIdx()) : nullptr;
+    const Staff* staff = score()->staff(is.staffIdx());
+    if (!sysStaff || !staff) {
+        return;
+    }
+
+    const MStyle& style = score()->style();
+    const Fraction tick = is.segment()->tick();
+    const double mag = staff->staffMag(tick);
+    const double distance = style.styleAbsolute(Sid::tupletVStemDistance) * mag;
+    const double hook = style.styleAbsolute(Sid::tupletBracketHookHeight) * mag;
+
+    const PointF measurePos = measure->canvasPos();
+    const double systemX = system->canvasPos().x();
+    const double staffTop = measurePos.y() + sysStaff->y();
+    const double staffBottom = staffTop + staff->staffHeight(tick);
+
+    // at the rhythmic position, whatever the shape of the preview notes
+    const double x1 = is.beyondScore() ? measurePos.x() + measure->width() + style.spatium() : measurePos.x() + is.segment()->x();
+
+    // clear the staff, the preview notes and the music at the input position
+    RectF musicRect(x1, staffTop, 0.0, staffBottom - staffTop);
+    musicRect.unite(previewRect);
+    if (!is.beyondScore()) {
+        const RectF shapeRect = is.segment()->staffShape(is.staffIdx()).bbox();
+        if (!shapeRect.isNull()) {
+            musicRect.unite(shapeRect.translated(measurePos.x() + is.segment()->x(), staffTop));
+        }
+    }
+
+    // above the staff, or below it in voices 2 and 4
+    const bool up = is.voice() % 2 == 0;
+    double edge = up ? musicRect.top() : musicRect.bottom();
+
+    // what the preview stays clear of: other items may overlap it
+    const SkylineLine& skyline = up ? sysStaff->skyline().north() : sysStaff->skyline().south();
+    SkylineLine clearOf = skyline.getFilteredCopy([](const ShapeElement& element) {
+        const EngravingItem* item = element.item();
+        return !item
+               || !(item->isBeam() || item->isType(ElementType::TREMOLO_TWOCHORD) || item->isArticulationOrFermata() || item->isFingering()
+                    || item->isTieSegment());
+    });
+    // it is nested in the tuplets here, or replaces them: inside them where there's room
+    const SkylineLine tuplets = skyline.getFilteredCopy([](const ShapeElement& element) {
+        const EngravingItem* item = element.item();
+        return !item || !(item->isTuplet() || (item->isText() && item->ownershipParentItem() && item->ownershipParentItem()->isTuplet()));
+    });
+
+    // the colour of the preview notes, as in doShowShadowNote
+    Color color = configuration()->noteInputPreviewColor();
+    if (!color.isValid() || color == configuration()->selectionColor()) {
+        color = configuration()->highlightSelectionColor(is.voice());
+    }
+
+    // only the number: the next duration sets the tuplet's length
+    for (auto it = tuplet->levels.rbegin(); it != tuplet->levels.rend(); ++it) {
+        // a number the score hides is shown in parentheses: it tells which tuplet is coming
+        const bool hidden = it->numberType == TupletNumberType::NO_TEXT;
+        String text = Tuplet::numberText(it->ratio, hidden ? TupletNumberType::SHOW_NUMBER : it->numberType,
+                                         style.styleB(Sid::tupletUseSymbols));
+        if (hidden) {
+            text = u"(" + text + u")";
+        }
+        Text* number = Factory::createText(score()->dummy(), TextStyleType::TUPLET);
+        number->setXmlText(text);
+        number->setColor(color);
+        number->mutldata()->setMag(mag);
+        score()->renderer()->layoutText1(number);
+        const RectF numberRect = number->ldata()->bbox();
+        const double halfHeight = std::max(numberRect.height() * 0.5, hook);
+
+        const double clearLeft = x1 - systemX;
+        const double clearRight = clearLeft + numberRect.width();
+        edge = up ? std::min(edge, staffTop + clearOf.top(clearLeft, clearRight))
+               : std::max(edge, staffTop + clearOf.bottom(clearLeft, clearRight));
+
+        double y = up ? edge - distance - halfHeight : edge + distance + halfHeight;
+        const RectF levelRect(x1, y - halfHeight, numberRect.width(), 2 * halfHeight);
+        double tupletsEdge = edge;
+        bool hitsTuplet = false;
+        for (const ShapeElement& element : tuplets.elements()) {
+            // the whole tuplet: its skyline element may be only the bracket
+            const EngravingItem* item = element.item();
+            const RectF tupletRect = (item->isTuplet() ? item : item->ownershipParentItem())->canvasBoundingRect();
+            if (tupletRect.right() > levelRect.left() && tupletRect.left() < levelRect.right()) {
+                hitsTuplet = hitsTuplet || tupletRect.intersects(levelRect);
+                tupletsEdge = up ? std::min(tupletsEdge, tupletRect.top()) : std::max(tupletsEdge, tupletRect.bottom());
+            }
+        }
+        if (hitsTuplet) {
+            edge = tupletsEdge;
+            y = up ? edge - distance - halfHeight : edge + distance + halfHeight;
+        }
+        edge = up ? y - halfHeight : y + halfHeight;
+
+        const PointF numberPos(x1 - numberRect.left(), y - numberRect.center().y());
+        painter->translate(numberPos);
+        score()->renderer()->drawItem(number, painter, opt);
+        painter->translate(-numberPos);
+        delete number;
+    }
 }
 
 void NotationInteraction::drawAnchorLines(Painter* painter)

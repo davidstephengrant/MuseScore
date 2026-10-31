@@ -2209,3 +2209,101 @@ TEST_F(Engraving_TupletTests, pendingTupletDottedUndo)
         }
     }
 }
+
+//-----------------------------------------
+//    tupletPreview
+//     the tuplet that the next note or rest creates, shown while
+//     note input waits
+//-----------------------------------------
+
+TEST_F(Engraving_TupletTests, tupletPreviewPending)
+{
+    for (NoteEntryMethod method : { NoteEntryMethod::BY_DURATION, NoteEntryMethod::RHYTHM }) {
+        MasterScore* score = pendingTupletScore(method);
+        ASSERT_TRUE(score);
+        InputState& is = score->inputState();
+
+        // nothing waits
+        EXPECT_FALSE(NoteInput::tupletPreview(score));
+
+        // a triplet waits for the next duration
+        setPendingTriplet(score, true);
+        std::optional<TupletPreview> preview = NoteInput::tupletPreview(score);
+        ASSERT_TRUE(preview);
+        EXPECT_EQ(preview->tick, Fraction(0, 1));
+        ASSERT_EQ(preview->levels.size(), 1u);
+        EXPECT_EQ(preview->levels[0].ratio, Fraction(3, 2));
+        EXPECT_EQ(preview->levels[0].numberType, TupletNumberType::SHOW_NUMBER);
+
+        // the next duration adds it
+        pressDuration(score, DurationType::V_EIGHTH);
+        EXPECT_FALSE(NoteInput::tupletPreview(score));
+
+        // after the triplet, with the number type it was asked for
+        pressDuration(score, DurationType::V_EIGHTH);
+        pressDuration(score, DurationType::V_EIGHTH);
+        for (TupletNumberType numberType : { TupletNumberType::SHOW_RELATION, TupletNumberType::NO_TEXT }) {
+            setPendingTriplet(score, true);
+            PendingTuplet pending = *is.pendingTuplet();
+            pending.numberType = numberType;
+            is.setPendingTuplet(pending);
+            preview = NoteInput::tupletPreview(score);
+            ASSERT_TRUE(preview);
+            EXPECT_EQ(preview->tick, Fraction(1, 4));
+            EXPECT_EQ(preview->levels[0].numberType, numberType);
+        }
+
+        // moving away cancels it
+        is.setSegment(score->tick2segment(Fraction(1, 2), false, SegmentType::ChordRest));
+        EXPECT_FALSE(NoteInput::tupletPreview(score));
+
+        delete score;
+    }
+}
+
+TEST_F(Engraving_TupletTests, tupletPreviewPendingBeyondScore)
+{
+    MasterScore* score = pendingTupletScore();
+    ASSERT_TRUE(score);
+    InputState& is = score->inputState();
+
+    // past the last measure, where the next duration appends a measure
+    is.setSegment(score->lastMeasure()->first(SegmentType::ChordRest));
+    is.setBeyondScore(true);
+    setPendingTriplet(score, true);
+    std::optional<TupletPreview> preview = NoteInput::tupletPreview(score);
+    ASSERT_TRUE(preview);
+    EXPECT_EQ(preview->tick, score->endTick());
+
+    delete score;
+}
+
+TEST_F(Engraving_TupletTests, tupletPreviewPendingRatioDotted)
+{
+    for (int dots : { 1, 2 }) {
+        MasterScore* score = pendingTupletScore();
+        ASSERT_TRUE(score);
+        InputState& is = score->inputState();
+
+        // a dotted or double-dotted value as the subdivision: always 3:2
+        TDuration eighth(DurationType::V_EIGHTH);
+        eighth.setDots(dots);
+        is.setDuration(eighth);
+        setPendingTriplet(score, true);
+        std::optional<TupletPreview> preview = NoteInput::tupletPreview(score);
+        ASSERT_TRUE(preview);
+        EXPECT_EQ(preview->levels[0].ratio, Fraction(3, 2));
+
+        // a dotted or double-dotted half divided: the ratio follows it
+        is.setPendingTuplet(std::nullopt);
+        TDuration half(DurationType::V_HALF);
+        half.setDots(dots);
+        is.setDuration(half);
+        setPendingTriplet(score, false);
+        preview = NoteInput::tupletPreview(score);
+        ASSERT_TRUE(preview);
+        EXPECT_EQ(preview->levels[0].ratio, dots == 1 ? Fraction(3, 3) : Fraction(3, 7));
+
+        delete score;
+    }
+}
