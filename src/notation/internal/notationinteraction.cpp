@@ -3722,7 +3722,23 @@ void NotationInteraction::drawTupletPreview(Painter* painter, const engraving::r
     pen.setJoinStyle(PenJoinStyle::MiterJoin);
     pen.setCapStyle(PenCapStyle::FlatCap);
 
-    // from the innermost tuplet out, each further from the staff
+    struct PreviewLevel {
+        Text* number = nullptr;
+        RectF numberRect;
+        double halfHeight = 0.0;
+        double x2 = 0.0;
+        double xCentre = 0.0;
+        double xGapLeft = 0.0;
+        double xGapRight = 0.0;
+        double clearRight = 0.0;
+        bool numberOnly = false;
+        bool endHook = false;
+        TupletBracketType bracketType = TupletBracketType::AUTO_BRACKET;
+    };
+    std::vector<PreviewLevel> previewLevels;
+    previewLevels.reserve(tuplet->levels.size());
+
+    // from the innermost tuplet out
     for (auto it = tuplet->levels.rbegin(); it != tuplet->levels.rend(); ++it) {
         // a tuplet that doesn't fit runs up to the barline or the end of the tuplet it is in, without an end hook
         bool levelFits = it->ticks <= tuplet->space;
@@ -3783,15 +3799,29 @@ void NotationInteraction::drawTupletPreview(Painter* painter, const engraving::r
         // in tight spacing, only the number, at the rhythmic position
         const bool numberOnly = tuplet->waiting || xGapLeft - x1 < hook * 0.5 || x2 - xGapRight < hook * 0.5;
 
-        const double clearLeft = x1 - systemX;
-        const double clearRight = (numberOnly ? x1 + numberWidth : x2) - systemX;
-        edge = up ? std::min(edge, staffTop + clearOf.top(clearLeft, clearRight))
-               : std::max(edge, staffTop + clearOf.bottom(clearLeft, clearRight));
+        previewLevels.push_back({ number, numberRect, halfHeight, x2, xCentre, xGapLeft, xGapRight,
+                                  (numberOnly ? x1 + numberWidth : x2) - systemX,
+                                  numberOnly, levelFits, it->bracketType });
+    }
 
-        double y = up ? edge - distance - halfHeight : edge + distance + halfHeight;
-        const RectF levelRect(x1, y - halfHeight, clearRight - clearLeft, 2 * halfHeight);
-        double tupletsEdge = edge;
-        bool hitsTuplet = false;
+    // clear of the items above, each level further from the staff
+    const double clearLeft = x1 - systemX;
+    const auto clearEdge = [&](double from, const PreviewLevel& level) {
+        return up ? std::min(from, staffTop + clearOf.top(clearLeft, level.clearRight))
+               : std::max(from, staffTop + clearOf.bottom(clearLeft, level.clearRight));
+    };
+    const auto levelY = [&](double from, const PreviewLevel& level) {
+        return up ? from - distance - level.halfHeight : from + distance + level.halfHeight;
+    };
+
+    // the levels stay together: inside the tuplets here if they all fit, otherwise outside them all
+    double levelEdge = edge;
+    double tupletsEdge = edge;
+    bool hitsTuplet = false;
+    for (const PreviewLevel& level : previewLevels) {
+        levelEdge = clearEdge(levelEdge, level);
+        const double y = levelY(levelEdge, level);
+        const RectF levelRect(x1, y - level.halfHeight, level.clearRight - clearLeft, 2 * level.halfHeight);
         for (const ShapeElement& element : tuplets.elements()) {
             // the whole tuplet: its skyline element may be only the bracket
             const EngravingItem* item = element.item();
@@ -3801,30 +3831,36 @@ void NotationInteraction::drawTupletPreview(Painter* painter, const engraving::r
                 tupletsEdge = up ? std::min(tupletsEdge, tupletRect.top()) : std::max(tupletsEdge, tupletRect.bottom());
             }
         }
-        if (hitsTuplet) {
-            edge = tupletsEdge;
-            y = up ? edge - distance - halfHeight : edge + distance + halfHeight;
-        }
+        levelEdge = up ? y - level.halfHeight : y + level.halfHeight;
+    }
+    if (hitsTuplet) {
+        edge = tupletsEdge;
+    }
+
+    for (const PreviewLevel& level : previewLevels) {
+        edge = clearEdge(edge, level);
+        const double y = levelY(edge, level);
         const double yHook = up ? y + hook : y - hook;
-        edge = up ? y - halfHeight : y + halfHeight;
+        edge = up ? y - level.halfHeight : y + level.halfHeight;
 
-        const PointF numberPos(numberOnly ? x1 - numberRect.left() : xCentre - numberRect.center().x(), y - numberRect.center().y());
+        const PointF numberPos(level.numberOnly ? x1 - level.numberRect.left() : level.xCentre - level.numberRect.center().x(),
+                               y - level.numberRect.center().y());
         painter->translate(numberPos);
-        score()->renderer()->drawItem(number, painter, opt);
+        score()->renderer()->drawItem(level.number, painter, opt);
         painter->translate(-numberPos);
-        delete number;
+        delete level.number;
 
-        if (numberOnly) {
+        if (level.numberOnly) {
             continue;
         }
 
-        const PointF left[] = { PointF(x1, yHook), PointF(x1, y), PointF(xGapLeft, y) };
-        const PointF right[] = { PointF(xGapRight, y), PointF(x2, y), PointF(x2, yHook) };
+        const PointF left[] = { PointF(x1, yHook), PointF(x1, y), PointF(level.xGapLeft, y) };
+        const PointF right[] = { PointF(level.xGapRight, y), PointF(level.x2, y), PointF(level.x2, yHook) };
         // a bracket the score hides is dashed: it shows where the tuplet goes
-        pen.setStyle(it->bracketType == TupletBracketType::SHOW_NO_BRACKET ? PenStyle::DashLine : PenStyle::SolidLine);
+        pen.setStyle(level.bracketType == TupletBracketType::SHOW_NO_BRACKET ? PenStyle::DashLine : PenStyle::SolidLine);
         painter->setPen(pen);
         painter->drawPolyline(left, 3);
-        painter->drawPolyline(right, levelFits ? 3 : 2);
+        painter->drawPolyline(right, level.endHook ? 3 : 2);
     }
 }
 

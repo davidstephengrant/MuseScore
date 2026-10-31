@@ -861,10 +861,11 @@ void NotationNoteInput::cancelPendingTuplet()
         return;
     }
 
-    const String type = Tuplet::typeUserName(is.pendingTuplet()->ratio.numerator());
-    is.setPendingTuplet(std::nullopt);
+    const PendingTuplet& pending = *is.pendingTuplet();
+    const String type = Tuplet::typeUserName((pending.nested.empty() ? pending : pending.nested.back()).ratio.numerator());
+    NoteInput::cancelPendingTuplet(score());
 
-    m_tupletWasPending = false;
+    m_tupletWasPending = is.pendingTuplet().has_value();
     //: %1 is a tuplet type, e.g. "Triplet"
     accessibilityController()->announce(muse::mtrc("notation", "%1 cancelled").arg(type));
     notifyAboutStateChanged();

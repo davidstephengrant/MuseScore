@@ -1554,19 +1554,45 @@ static bool pendingTupletShape(const PendingTuplet& pending, const TDuration& du
 }
 
 //---------------------------------------------------------
+//   nestedPendingTupletsFit
+//    Whether each tuplet waiting inside the pending tuplet
+//    fits in the one it is nested in, from its first note:
+//    `content` is the pending tuplet's notated length
+//---------------------------------------------------------
+
+static bool nestedPendingTupletsFit(const PendingTuplet& pending, const Fraction& content)
+{
+    Fraction space = content;
+    for (const PendingTuplet& nested : pending.nested) {
+        Fraction ratio;
+        TDuration baseLen;
+        if (!nested.duration || !pendingTupletShape(nested, *nested.duration, ratio, baseLen)) {
+            return false;
+        }
+        if (baseLen.fraction() * ratio.denominator() > space) {
+            return false;
+        }
+        space = baseLen.fraction() * ratio.numerator();
+    }
+    return true;
+}
+
+//---------------------------------------------------------
 //   pendingTupletFits
 //    Whether the tuplet waiting at the input position fits
-//    there when `duration` sizes it. In Insert input, its
-//    time is inserted, so it fits anywhere but inside
+//    there when `duration` sizes it, with the tuplets nested
+//    in it unless `withNested` is false. In Insert input,
+//    its time is inserted, so it fits anywhere but inside
 //    another tuplet.
 //---------------------------------------------------------
 
-static bool pendingTupletFits(const Score* score, const TDuration& duration)
+static bool pendingTupletFits(const Score* score, const TDuration& duration, bool withNested = true)
 {
     const InputState& is = score->inputState();
     Fraction ratio;
     TDuration baseLen;
-    if (!pendingTupletShape(*is.pendingTuplet(), duration, ratio, baseLen)) {
+    if (!pendingTupletShape(*is.pendingTuplet(), duration, ratio, baseLen)
+        || (withNested && !nestedPendingTupletsFit(*is.pendingTuplet(), baseLen.fraction() * ratio.numerator()))) {
         return false;
     }
 
@@ -1621,8 +1647,12 @@ bool NoteInput::pendingTupletFitsHere(const Score* score)
 //    where it doesn't fit: the next note is then refused.
 //    Asked for again while one waits there, it replaces that
 //    one, keeping what sized it unless the input duration has
-//    changed since. False if its note value is too short, or
-//    in Insert input inside another tuplet.
+//    changed since. In By note name input, a shorter input
+//    duration nests it in the first note of the waiting
+//    tuplet, if that fits; with tuplets nested there, it
+//    replaces or nests in the innermost one. False if its
+//    note value is too short, or in Insert input inside
+//    another tuplet.
 //---------------------------------------------------------
 
 bool NoteInput::setPendingTuplet(Score* score, PendingTuplet pending)
@@ -1636,11 +1666,21 @@ bool NoteInput::setPendingTuplet(Score* score, PendingTuplet pending)
 
     const std::optional<PendingTuplet> old = is.pendingTuplet();
     TDuration duration = is.duration();
+    bool nests = false;
+    bool replacesNested = false;
     if (is.pendingTupletHere() && old->duration) {
+        const bool fits = pendingTupletFits(score, *old->duration);
+        // with tuplets nested in it, the innermost one, unless the outermost one doesn't fit
+        replacesNested = !old->nested.empty() && (fits || pendingTupletFits(score, *old->duration, /*withNested*/ false));
+        const PendingTuplet& waiting = replacesNested ? old->nested.back() : *old;
         Fraction ratio;
         TDuration baseLen;
-        if (pendingTupletShape(*old, *old->duration, ratio, baseLen) && baseLen == is.duration()) {
-            duration = *old->duration;
+        if (pendingTupletShape(waiting, *waiting.duration, ratio, baseLen)) {
+            if (baseLen == is.duration()) {
+                duration = *waiting.duration;
+            }
+            nests = is.usingNoteEntryMethod(NoteEntryMethod::BY_NOTE_NAME) && fits
+                    && is.duration().fraction() < baseLen.fraction();
         }
     }
 
@@ -1654,6 +1694,14 @@ bool NoteInput::setPendingTuplet(Score* score, PendingTuplet pending)
     pending.tick = is.tick();
     pending.track = is.track();
     pending.beyondScore = is.beyondScore();
+    if (nests || replacesNested) {
+        PendingTuplet outer = *old;
+        if (!nests) {
+            outer.nested.pop_back();
+        }
+        outer.nested.push_back(pending);
+        pending = outer;
+    }
     is.setPendingTuplet(pending);
 
     // the first note gets the tuplet's note value, as when the tuplet is added straight away
@@ -1662,10 +1710,40 @@ bool NoteInput::setPendingTuplet(Score* score, PendingTuplet pending)
 }
 
 //---------------------------------------------------------
+//   cancelPendingTuplet
+//    Cancel the innermost waiting tuplet. The duration becomes
+//    the note value of the tuplet it was waiting in.
+//---------------------------------------------------------
+
+void NoteInput::cancelPendingTuplet(Score* score)
+{
+    InputState& is = score->inputState();
+    if (!is.pendingTuplet()) {
+        return;
+    }
+
+    PendingTuplet pending = *is.pendingTuplet();
+    if (pending.nested.empty()) {
+        is.setPendingTuplet(std::nullopt);
+        return;
+    }
+
+    pending.nested.pop_back();
+    const PendingTuplet& waiting = pending.nested.empty() ? pending : pending.nested.back();
+    Fraction ratio;
+    TDuration baseLen;
+    if (pendingTupletShape(waiting, *waiting.duration, ratio, baseLen)) {
+        is.setDuration(baseLen);
+    }
+    is.setPendingTuplet(pending);
+}
+
+//---------------------------------------------------------
 //   tupletPreview
-//    The tuplet waiting at the input position: sized when it
-//    was asked for in By note name and Insert input, and by
-//    the next duration in By duration and Rhythm input
+//    The tuplet waiting at the input position, with the
+//    tuplets nested in it: sized when it was asked for in By
+//    note name and Insert input, and by the next duration in
+//    By duration and Rhythm input
 //---------------------------------------------------------
 
 std::optional<TupletPreview> NoteInput::tupletPreview(const Score* score)
@@ -1710,8 +1788,20 @@ std::optional<TupletPreview> NoteInput::tupletPreview(const Score* score)
     }
     level.numberType = pending.numberType;
     level.bracketType = pending.bracketType;
-    level.ticks = actualTicks(baseLen.fraction() * level.ratio.denominator(), parent, timeStretch);
+    Fraction factor = actualTicks(Fraction(1, 1), parent, timeStretch);
+    level.ticks = baseLen.fraction() * level.ratio.denominator() * factor;
     preview.levels.push_back(level);
+    // the tuplets waiting inside it
+    for (const PendingTuplet& nested : pending.nested) {
+        factor /= level.ratio;
+        if (!pendingTupletShape(nested, *nested.duration, level.ratio, baseLen)) {
+            break;
+        }
+        level.numberType = nested.numberType;
+        level.bracketType = nested.bracketType;
+        level.ticks = baseLen.fraction() * level.ratio.denominator() * factor;
+        preview.levels.push_back(level);
+    }
     preview.fits = pendingTupletFits(score, duration);
     // in By note name and Insert input, its size is already known
     preview.waiting = !pending.duration;
@@ -1761,17 +1851,28 @@ static bool addPendingTuplet(Transaction& tx, Score* score, bool insertTime)
     }
     ChordRest* cr = is.cr();
     // addTuplet would show a warning if it can't add the tuplet
-    Tuplet* tuplet = cr && score->canAddTuplet(cr, ratio, baseLen)
-                     ? score->addTuplet(cr, ratio, baseLen, pending.numberType, pending.bracketType) : nullptr;
-    if (!tuplet || tuplet->elements().empty()) {
+    Tuplet* outer = cr && score->canAddTuplet(cr, ratio, baseLen)
+                    ? score->addTuplet(cr, ratio, baseLen, pending.numberType, pending.bracketType) : nullptr;
+    if (!outer || outer->elements().empty()) {
         return false;
+    }
+    // the tuplets waiting inside it, each in the first note of the one before
+    Tuplet* tuplet = outer;
+    for (const PendingTuplet& nested : pending.nested) {
+        ChordRest* first = toChordRest(tuplet->elements().front());
+        Tuplet* inner = pendingTupletShape(nested, *nested.duration, ratio, baseLen) && score->canAddTuplet(first, ratio, baseLen)
+                        ? score->addTuplet(first, ratio, baseLen, nested.numberType, nested.bracketType) : nullptr;
+        if (!inner || inner->elements().empty()) {
+            break;
+        }
+        tuplet = inner;
     }
 
     // addTuplet can reselect the selection, which moves the input position to its voice
     is.setTrack(tuplet->track());
     is.setPendingTuplet(std::nullopt);
     if (insertTime) {
-        is.setInsertedTuplet(tuplet);
+        is.setInsertedTuplet(outer);
     }
     is.setSegment(toChordRest(tuplet->elements().front())->segment());
     if (!pending.duration) {

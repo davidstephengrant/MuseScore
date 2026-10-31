@@ -124,6 +124,7 @@ public:
     static void setDuration(Transaction& tx, Score* score, DurationType duration);
     static bool canAddPendingTuplet(const Score* score, DurationType duration);
     static bool setPendingTuplet(Score* score, PendingTuplet pending);
+    static void cancelPendingTuplet(Score* score);
     static bool pendingTupletFitsHere(const Score* score);
     static bool addPendingTupletForNote(Transaction& tx, Score* score, track_idx_t track, bool insertTime = false);
     static std::optional<TupletPreview> tupletPreview(const Score* score);
