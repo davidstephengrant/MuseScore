@@ -4121,3 +4121,112 @@ TEST_F(Engraving_TupletTests, pendingTupletInsertDottedBeyondScoreDoesNotFit)
         delete score;
     }
 }
+
+//-----------------------------------------
+//    tupletPreview in By note name and Insert input
+//     the tuplet waiting for a note, whose length is known
+//-----------------------------------------
+
+TEST_F(Engraving_TupletTests, tupletPreviewPendingNoteName)
+{
+    MasterScore* score = pendingTupletScore(NoteEntryMethod::BY_NOTE_NAME);
+    ASSERT_TRUE(score);
+    InputState& is = score->inputState();
+
+    // in By note name input, an eighth triplet: its length is known while it waits
+    is.setDuration(DurationType::V_EIGHTH);
+    ASSERT_TRUE(waitForTuplet(score, true));
+    std::optional<TupletPreview> preview = NoteInput::tupletPreview(score);
+    ASSERT_TRUE(preview);
+    ASSERT_EQ(preview->levels.size(), 1u);
+    EXPECT_EQ(preview->levels.back().ticks, Fraction(1, 4));
+    EXPECT_EQ(preview->space, Fraction(1, 1));
+    EXPECT_TRUE(preview->fits);
+    EXPECT_FALSE(preview->waiting);
+    EXPECT_FALSE(preview->inserts);
+
+    // another duration is for the first note: the tuplet stays the same
+    is.setDuration(DurationType::V_HALF);
+    preview = NoteInput::tupletPreview(score);
+    ASSERT_TRUE(preview);
+    EXPECT_EQ(preview->levels.back().ticks, Fraction(1, 4));
+
+    delete score;
+}
+
+TEST_F(Engraving_TupletTests, tupletPreviewPendingDoesNotFit)
+{
+    MasterScore* score = pendingTupletScore(NoteEntryMethod::BY_NOTE_NAME);
+    ASSERT_TRUE(score);
+    InputState& is = score->inputState();
+
+    // on beat 4, a quarter triplet would cross the barline
+    is.setDuration(DurationType::V_HALF);
+    enterNote(score);
+    is.setDuration(DurationType::V_QUARTER);
+    enterNote(score);
+    ASSERT_TRUE(waitForTuplet(score, true));
+    std::optional<TupletPreview> preview = NoteInput::tupletPreview(score);
+    ASSERT_TRUE(preview);
+    EXPECT_EQ(preview->tick, Fraction(3, 4));
+    EXPECT_EQ(preview->levels.back().ticks, Fraction(1, 2));
+    EXPECT_EQ(preview->space, Fraction(1, 4));
+    EXPECT_FALSE(preview->fits);
+
+    // an eighth triplet fits
+    is.setDuration(DurationType::V_EIGHTH);
+    ASSERT_TRUE(waitForTuplet(score, true));
+    preview = NoteInput::tupletPreview(score);
+    ASSERT_TRUE(preview);
+    EXPECT_TRUE(preview->fits);
+
+    delete score;
+}
+
+TEST_F(Engraving_TupletTests, tupletPreviewPendingNumberAndBracket)
+{
+    // the waiting tuplet's number and bracket types, for the number in parentheses and the dashed bracket
+    MasterScore* score = pendingTupletScore(NoteEntryMethod::BY_NOTE_NAME);
+    ASSERT_TRUE(score);
+    score->inputState().setDuration(DurationType::V_EIGHTH);
+    PendingTuplet pending;
+    pending.ratio = Fraction(3, 2);
+    pending.numberType = TupletNumberType::NO_TEXT;
+    pending.bracketType = TupletBracketType::SHOW_NO_BRACKET;
+    pending.durationAsSubdivision = true;
+    ASSERT_TRUE(NoteInput::setPendingTuplet(score, pending));
+    std::optional<TupletPreview> preview = NoteInput::tupletPreview(score);
+    ASSERT_TRUE(preview);
+    ASSERT_EQ(preview->levels.size(), 1u);
+    EXPECT_EQ(preview->levels.back().numberType, TupletNumberType::NO_TEXT);
+    EXPECT_EQ(preview->levels.back().bracketType, TupletBracketType::SHOW_NO_BRACKET);
+
+    delete score;
+}
+
+TEST_F(Engraving_TupletTests, tupletPreviewPendingInsert)
+{
+    // in Insert input, its time is inserted, so it is drawn over the music after it
+    MasterScore* score = pendingTupletInsertScore();
+    ASSERT_TRUE(score);
+    score->inputState().setDuration(DurationType::V_HALF);
+    ASSERT_TRUE(waitForTuplet(score, true));
+    std::optional<TupletPreview> preview = NoteInput::tupletPreview(score);
+    ASSERT_TRUE(preview);
+    EXPECT_TRUE(preview->inserts);
+    EXPECT_TRUE(preview->fits);
+    EXPECT_EQ(preview->levels.back().ticks, Fraction(1, 1));
+    delete score;
+
+    // past the end of the score, it goes in the measure that the next note appends
+    score = pendingTupletInsertBeyondScoreScore();
+    ASSERT_TRUE(score);
+    score->inputState().setDuration(DurationType::V_EIGHTH);
+    ASSERT_TRUE(waitForTuplet(score, true));
+    preview = NoteInput::tupletPreview(score);
+    ASSERT_TRUE(preview);
+    EXPECT_FALSE(preview->inserts);
+    EXPECT_EQ(preview->tick, score->endTick());
+    EXPECT_EQ(preview->space, Fraction(1, 1));
+    delete score;
+}

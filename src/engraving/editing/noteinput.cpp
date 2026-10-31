@@ -1663,29 +1663,59 @@ bool NoteInput::setPendingTuplet(Score* score, PendingTuplet pending)
 
 //---------------------------------------------------------
 //   tupletPreview
-//    The tuplet waiting at the input position for the
-//    duration that sizes it
+//    The tuplet waiting at the input position: sized when it
+//    was asked for in By note name and Insert input, and by
+//    the next duration in By duration and Rhythm input
 //---------------------------------------------------------
 
 std::optional<TupletPreview> NoteInput::tupletPreview(const Score* score)
 {
     const InputState& is = score->inputState();
-    if (!is.segment() || !is.pendingTupletHere()) {
+    const Staff* staff = is.track() != muse::nidx ? score->staff(track2staff(is.track())) : nullptr;
+    if (!is.segment() || !staff || !is.pendingTupletHere()) {
         return std::nullopt;
+    }
+
+    TupletPreview preview;
+    Tuplet* parent = nullptr;
+    Fraction timeStretch(1, 1);
+    if (is.beyondScore()) {
+        // a new measure like the last one
+        const Measure* last = score->lastMeasure();
+        if (!last) {
+            return std::nullopt;
+        }
+        preview.tick = score->endTick();
+        preview.space = last->ticks();
+    } else {
+        const ChordRest* cr = is.cr();
+        if (!cr) {
+            // a longer chord or rest that covers the input position
+            const ChordRest* prevCr = is.segment()->nextChordRest(is.track(), /*backwards*/ true, /*stopAtMeasureBoundary*/ true);
+            cr = prevCr && prevCr->endTick() > is.tick() ? prevCr : nullptr;
+        }
+        parent = cr ? cr->tuplet() : nullptr;
+        preview.tick = is.tick();
+        preview.space = (parent ? parent->tick() + parent->actualTicks() : is.segment()->measure()->endTick()) - preview.tick;
+        timeStretch = staff->timeStretch(preview.tick);
     }
 
     const PendingTuplet& pending = *is.pendingTuplet();
+    const TDuration duration = pendingTupletDuration(is);
     TupletPreview::Level level;
     TDuration baseLen;
-    // its ratio as if the input duration sized it
-    if (!pendingTupletShape(pending, is.duration(), level.ratio, baseLen)) {
+    // in By duration and Rhythm input, as if the input duration sized it
+    if (!pendingTupletShape(pending, duration, level.ratio, baseLen)) {
         return std::nullopt;
     }
     level.numberType = pending.numberType;
-
-    TupletPreview preview;
-    preview.tick = is.beyondScore() ? score->endTick() : is.tick();
+    level.bracketType = pending.bracketType;
+    level.ticks = actualTicks(baseLen.fraction() * level.ratio.denominator(), parent, timeStretch);
     preview.levels.push_back(level);
+    preview.fits = pendingTupletFits(score, duration);
+    // in By note name and Insert input, its size is already known
+    preview.waiting = !pending.duration;
+    preview.inserts = is.usingNoteEntryMethod(NoteEntryMethod::TIMEWISE) && !is.beyondScore();
     return preview;
 }
 

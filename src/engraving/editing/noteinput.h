@@ -48,6 +48,7 @@ struct PendingTuplet;
 struct Position;
 
 enum class AccidentalType : unsigned char;
+enum class TupletBracketType : unsigned char;
 enum class TupletNumberType : unsigned char;
 enum class SymId;
 
@@ -61,11 +62,21 @@ struct TupletPreview {
     struct Level {
         Fraction ratio;
         TupletNumberType numberType {};
+        TupletBracketType bracketType {};
+        // in score time
+        Fraction ticks;
     };
 
     Fraction tick;
     // from the outermost to the innermost
     std::vector<Level> levels;
+    // for the outermost: up to the barline or the end of the tuplet it is in
+    Fraction space;
+    bool fits = true;
+    // waiting for the duration that sizes it: its length isn't known yet
+    bool waiting = false;
+    // in Insert input: its time is inserted, so it runs over the music after it
+    bool inserts = false;
 };
 
 class NoteInput

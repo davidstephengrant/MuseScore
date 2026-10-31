@@ -3616,6 +3616,29 @@ void NotationInteraction::drawInputPreview(Painter* painter, const engraving::re
     DeleteAll(previewList);
 }
 
+//! NOTE: the x position of tick in the measure, between its chords and rests
+static double measureXAt(const Measure* measure, const Fraction& tick)
+{
+    Fraction prevTick = measure->tick();
+    double prevX = 0.0;
+    for (const Segment* s = measure->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        if (s->tick() == tick) {
+            return s->x();
+        }
+        if (s->tick() > tick) {
+            return prevX + (s->x() - prevX) * ((tick - prevTick) / (s->tick() - prevTick)).toDouble();
+        }
+        prevTick = s->tick();
+        prevX = s->x();
+    }
+
+    const Fraction endTick = measure->endTick();
+    if (endTick <= prevTick) {
+        return measure->width();
+    }
+    return prevX + (measure->width() - prevX) * ((tick - prevTick) / (endTick - prevTick)).toDouble();
+}
+
 void NotationInteraction::drawTupletPreview(Painter* painter, const engraving::rendering::PaintOptions& opt, const RectF& previewRect)
 {
     const std::optional<TupletPreview> tuplet = NoteInput::tupletPreview(score());
@@ -3628,7 +3651,8 @@ void NotationInteraction::drawTupletPreview(Painter* painter, const engraving::r
     const System* system = measure->system();
     const SysStaff* sysStaff = system ? system->staff(is.staffIdx()) : nullptr;
     const Staff* staff = score()->staff(is.staffIdx());
-    if (!sysStaff || !staff) {
+    const Measure* lastMeasure = score()->lastMeasure();
+    if (!sysStaff || !staff || !lastMeasure) {
         return;
     }
 
@@ -3637,22 +3661,31 @@ void NotationInteraction::drawTupletPreview(Painter* painter, const engraving::r
     const double mag = staff->staffMag(tick);
     const double distance = style.styleAbsolute(Sid::tupletVStemDistance) * mag;
     const double hook = style.styleAbsolute(Sid::tupletBracketHookHeight) * mag;
+    // the gap around the number, as in TupletLayout
+    const double numberGap = 0.35 * style.spatium() * mag;
 
     const PointF measurePos = measure->canvasPos();
     const double systemX = system->canvasPos().x();
     const double staffTop = measurePos.y() + sysStaff->y();
     const double staffBottom = staffTop + staff->staffHeight(tick);
 
-    // at the rhythmic position, whatever the shape of the preview notes
+    // from the rhythmic position, whatever the shape of the preview notes
     const double x1 = is.beyondScore() ? measurePos.x() + measure->width() + style.spatium() : measurePos.x() + is.segment()->x();
 
-    // clear the staff, the preview notes and the music at the input position
+    // clear the preview notes and the music already in the outermost tuplet's time
     RectF musicRect(x1, staffTop, 0.0, staffBottom - staffTop);
     musicRect.unite(previewRect);
     if (!is.beyondScore()) {
-        const RectF shapeRect = is.segment()->staffShape(is.staffIdx()).bbox();
-        if (!shapeRect.isNull()) {
-            musicRect.unite(shapeRect.translated(measurePos.x() + is.segment()->x(), staffTop));
+        // a waiting tuplet's length isn't known: only the music at the input position
+        const Fraction length = tuplet->levels.front().ticks;
+        const Fraction end = tuplet->waiting ? tuplet->tick
+                             : tuplet->tick + (tuplet->inserts ? length : std::min(length, tuplet->space));
+        for (const Segment* s = is.segment(); s && (s == is.segment() || s->tick() < end) && s->measure()->system() == system;
+             s = s->next1(SegmentType::ChordRest)) {
+            const RectF shapeRect = s->staffShape(is.staffIdx()).bbox();
+            if (!shapeRect.isNull()) {
+                musicRect.unite(shapeRect.translated(s->measure()->canvasPos().x() + s->x(), staffTop));
+            }
         }
     }
 
@@ -3674,14 +3707,60 @@ void NotationInteraction::drawTupletPreview(Painter* painter, const engraving::r
         return !item || !(item->isTuplet() || (item->isText() && item->ownershipParentItem() && item->ownershipParentItem()->isTuplet()));
     });
 
+    // a waiting tuplet's length depends on the next duration: only its number, never as not fitting
+    const bool fits = tuplet->fits || tuplet->waiting;
     // the colour of the preview notes, as in doShowShadowNote
     Color color = configuration()->noteInputPreviewColor();
     if (!color.isValid() || color == configuration()->selectionColor()) {
         color = configuration()->highlightSelectionColor(is.voice());
     }
+    if (!fits) {
+        // lightened like the voice colours (highlightSelectionColor), to sit beside them
+        color = Color::fromQColor(engravingConfiguration()->criticalColor().toQColor().lighter(135));
+    }
+    Pen pen(color, style.styleAbsolute(Sid::tupletBracketWidth) * mag);
+    pen.setJoinStyle(PenJoinStyle::MiterJoin);
+    pen.setCapStyle(PenCapStyle::FlatCap);
 
-    // only the number: the next duration sets the tuplet's length
+    // from the innermost tuplet out, each further from the staff
     for (auto it = tuplet->levels.rbegin(); it != tuplet->levels.rend(); ++it) {
+        // a tuplet that doesn't fit runs up to the barline or the end of the tuplet it is in, without an end hook
+        bool levelFits = it->ticks <= tuplet->space;
+        const Fraction length = levelFits ? it->ticks : tuplet->space;
+        double x2 = 0.0;
+        if (tuplet->waiting) {
+            x2 = previewRect.isNull() ? x1 : previewRect.right();
+        } else if (tuplet->inserts) {
+            // its whole length, into the next measures on this system; beyond them, open-ended at the last barline
+            const Fraction end = tuplet->tick + it->ticks;
+            const Measure* endMeasure = measure;
+            const Measure* lastOnSystem = measure;
+            while (endMeasure && end > endMeasure->endTick()) {
+                endMeasure = endMeasure->nextMeasure();
+                if (endMeasure && endMeasure->system() == system) {
+                    lastOnSystem = endMeasure;
+                }
+            }
+            levelFits = endMeasure && endMeasure->system() == system;
+            x2 = levelFits ? endMeasure->canvasPos().x() + measureXAt(endMeasure, end)
+                 : lastOnSystem->canvasPos().x() + lastOnSystem->width();
+        } else if (is.beyondScore()) {
+            // as in the measure that the next note appends, cut off at the page's edge
+            x2 = x1 + lastMeasure->width() * (length / lastMeasure->ticks()).toDouble();
+            const Page* page = system->page();
+            const double pageRight = page ? page->ldata()->bbox().translated(page->pos()).right() - style.spatium() : x2;
+            if (x2 > pageRight) {
+                x2 = pageRight;
+                levelFits = false;
+            }
+        } else {
+            x2 = measurePos.x() + measureXAt(measure, tuplet->tick + length);
+        }
+        if (levelFits && !tuplet->waiting) {
+            x2 -= style.styleAbsolute(Sid::minNoteDistance) * mag;
+        }
+        x2 = std::max(x2, previewRect.isNull() ? x1 : previewRect.right());
+
         // a number the score hides is shown in parentheses: it tells which tuplet is coming
         const bool hidden = it->numberType == TupletNumberType::NO_TEXT;
         String text = Tuplet::numberText(it->ratio, hidden ? TupletNumberType::SHOW_NUMBER : it->numberType,
@@ -3695,15 +3774,22 @@ void NotationInteraction::drawTupletPreview(Painter* painter, const engraving::r
         number->mutldata()->setMag(mag);
         score()->renderer()->layoutText1(number);
         const RectF numberRect = number->ldata()->bbox();
+        const double numberWidth = numberRect.width();
         const double halfHeight = std::max(numberRect.height() * 0.5, hook);
 
+        const double xCentre = (x1 + x2) * 0.5;
+        const double xGapLeft = xCentre - numberWidth * 0.5 - numberGap;
+        const double xGapRight = xCentre + numberWidth * 0.5 + numberGap;
+        // in tight spacing, only the number, at the rhythmic position
+        const bool numberOnly = tuplet->waiting || xGapLeft - x1 < hook * 0.5 || x2 - xGapRight < hook * 0.5;
+
         const double clearLeft = x1 - systemX;
-        const double clearRight = clearLeft + numberRect.width();
+        const double clearRight = (numberOnly ? x1 + numberWidth : x2) - systemX;
         edge = up ? std::min(edge, staffTop + clearOf.top(clearLeft, clearRight))
                : std::max(edge, staffTop + clearOf.bottom(clearLeft, clearRight));
 
         double y = up ? edge - distance - halfHeight : edge + distance + halfHeight;
-        const RectF levelRect(x1, y - halfHeight, numberRect.width(), 2 * halfHeight);
+        const RectF levelRect(x1, y - halfHeight, clearRight - clearLeft, 2 * halfHeight);
         double tupletsEdge = edge;
         bool hitsTuplet = false;
         for (const ShapeElement& element : tuplets.elements()) {
@@ -3719,13 +3805,26 @@ void NotationInteraction::drawTupletPreview(Painter* painter, const engraving::r
             edge = tupletsEdge;
             y = up ? edge - distance - halfHeight : edge + distance + halfHeight;
         }
+        const double yHook = up ? y + hook : y - hook;
         edge = up ? y - halfHeight : y + halfHeight;
 
-        const PointF numberPos(x1 - numberRect.left(), y - numberRect.center().y());
+        const PointF numberPos(numberOnly ? x1 - numberRect.left() : xCentre - numberRect.center().x(), y - numberRect.center().y());
         painter->translate(numberPos);
         score()->renderer()->drawItem(number, painter, opt);
         painter->translate(-numberPos);
         delete number;
+
+        if (numberOnly) {
+            continue;
+        }
+
+        const PointF left[] = { PointF(x1, yHook), PointF(x1, y), PointF(xGapLeft, y) };
+        const PointF right[] = { PointF(xGapRight, y), PointF(x2, y), PointF(x2, yHook) };
+        // a bracket the score hides is dashed: it shows where the tuplet goes
+        pen.setStyle(it->bracketType == TupletBracketType::SHOW_NO_BRACKET ? PenStyle::DashLine : PenStyle::SolidLine);
+        painter->setPen(pen);
+        painter->drawPolyline(left, 3);
+        painter->drawPolyline(right, levelFits ? 3 : 2);
     }
 }
 
