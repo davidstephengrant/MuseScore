@@ -28,6 +28,7 @@
 #include "dom/lyrics.h"
 #include "dom/marker.h"
 #include "dom/measure.h"
+#include "dom/measurerepeat.h"
 #include "dom/measurenumber.h"
 #include "dom/note.h"
 #include "dom/parenthesis.h"
@@ -52,6 +53,7 @@ void MaskLayout::computeMasks(LayoutContext& ctx, Page* page)
 
     for (const System* system : page->systems()) {
         std::vector<TextBase*> allSystemText = collectAllSystemText(system);
+        std::vector<MeasureRepeat*> allSystemMeasureRepeats = collectAllSystemMeasureRepeats(system);
 
         for (MeasureBase* mb : system->measures()) {
             if (!mb->isMeasure()) {
@@ -62,7 +64,7 @@ void MaskLayout::computeMasks(LayoutContext& ctx, Page* page)
             if (maskBarlines) {
                 for (const Segment& seg : measure->segments()) {
                     if (seg.isType(SegmentType::BarLineTypes)) {
-                        computeBarlineMasks(&seg, system, allSystemText, ctx);
+                        computeBarlineMasks(&seg, system, allSystemText, allSystemMeasureRepeats, ctx);
                     }
                 }
             }
@@ -101,7 +103,7 @@ void MaskLayout::computeMasks(LayoutContext& ctx, Page* page)
 }
 
 void MaskLayout::computeBarlineMasks(const Segment* barlineSement, const System* system, const std::vector<TextBase*>& allSystemText,
-                                     LayoutContext& ctx)
+                                     const std::vector<MeasureRepeat*>& allSystemMeasureRepeats, LayoutContext& ctx)
 {
     if (barlineSement->measure()->isLastInSystem() && barlineSement == barlineSement->measure()->lastEnabled()) {
         return;
@@ -120,11 +122,12 @@ void MaskLayout::computeBarlineMasks(const Segment* barlineSement, const System*
         if (!barline || !barline->spanStaff()) {
             continue;
         }
-        maskBarlineForText(barline, allSystemText);
+        maskBarlineForText(barline, allSystemText, allSystemMeasureRepeats);
     }
 }
 
-void MaskLayout::maskBarlineForText(BarLine* barline, const std::vector<TextBase*>& allSystemText)
+void MaskLayout::maskBarlineForText(BarLine* barline, const std::vector<TextBase*>& allSystemText,
+                                    const std::vector<MeasureRepeat*>& allSystemMeasureRepeats)
 {
     TRACEFUNC;
 
@@ -157,6 +160,19 @@ void MaskLayout::maskBarlineForText(BarLine* barline, const std::vector<TextBase
         filteredTextShape.pad(maskPadding);
 
         mask.add(filteredTextShape.translate(-barlinePos));
+    }
+
+    // Measure repeat numbers are symbols, so mask them like unframed text
+    for (const MeasureRepeat* measureRepeat : allSystemMeasureRepeats) {
+        const double collisionPadding = 0.2 * spatium;
+        const double maskPadding = 0.5 * spatium;
+
+        RectF numberRect = measureRepeat->numberRect().translated(measureRepeat->pagePos());
+        if (!barlineShape.intersects(numberRect.padded(collisionPadding))) {
+            continue;
+        }
+
+        mask.add(numberRect.padded(maskPadding).translated(-barlinePos));
     }
 
     if (mask.empty()) {
@@ -280,6 +296,35 @@ std::vector<TextBase*> MaskLayout::collectAllSystemText(const System* system)
     }
 
     return allText;
+}
+
+std::vector<MeasureRepeat*> MaskLayout::collectAllSystemMeasureRepeats(const System* system)
+{
+    TRACEFUNC;
+
+    std::vector<MeasureRepeat*> allMeasureRepeats;
+
+    for (const MeasureBase* mb : system->measures()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (const Segment& s : toMeasure(mb)->segments()) {
+            if (!s.isChordRestType() || !s.enabled()) {
+                continue;
+            }
+            for (EngravingItem* item : s.elist()) {
+                if (!item || !item->isMeasureRepeat() || !item->visible() || !system->staff(item->staffIdx())->show()) {
+                    continue;
+                }
+                MeasureRepeat* measureRepeat = toMeasureRepeat(item);
+                if (!measureRepeat->ldata()->numberSym.empty()) {
+                    allMeasureRepeats.push_back(measureRepeat);
+                }
+            }
+        }
+    }
+
+    return allMeasureRepeats;
 }
 
 void MaskLayout::maskTABStringLinesForFrets(StaffLines* staffLines, const LayoutContext& ctx)

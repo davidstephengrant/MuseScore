@@ -31,6 +31,7 @@
 #include "engraving/dom/system.h"
 #include "engraving/dom/timesig.h"
 
+#include "engraving/editing/editmeasurerepeat.h"
 #include "engraving/editing/editproperty.h"
 #include "engraving/editing/edittimesig.h"
 #include "engraving/editing/transaction/transaction.h"
@@ -429,6 +430,50 @@ TEST_F(Engraving_BarlineTests, deleteSkipBarlines)
     score->doLayout();
 
     EXPECT_TRUE(ScoreComp::saveCompareScore(score, String("barlinedelete.mscx"), BARLINE_DATA_DIR + String("barlinedelete-ref.mscx")));
+
+    delete score;
+}
+
+//---------------------------------------------------------
+//   maskBarlineForMeasureRepeatNumber
+//   The number of a 2- or 4-bar repeat sits on a barline that spans
+//   into the gap between the staves of a grand staff. With
+//   maskBarlinesForText on, that barline gets a gap behind the number.
+//
+//    NO REFERENCE SCORE IS USED.
+//---------------------------------------------------------
+TEST_F(Engraving_BarlineTests, maskBarlineForMeasureRepeatNumber)
+{
+    MasterScore* score = ScoreRW::readScore(BARLINE_DATA_DIR + u"barlinemask.mscx");
+    ASSERT_TRUE(score);
+
+    score->style().set(Sid::maskBarlinesForText, true);
+
+    // In the lower staff: a 2-bar repeat in bars 3-4 and a 4-bar repeat in bars 5-8
+    score->startCmd(TranslatableString::untranslatable("Engraving barline tests"));
+    EditMeasureRepeat::addMeasureRepeat(score->transactionManager()->currentOrDummyTransaction(), score, score->crMeasure(2), 2, 1);
+    EditMeasureRepeat::addMeasureRepeat(score->transactionManager()->currentOrDummyTransaction(), score, score->crMeasure(4), 4, 1);
+    score->endCmd();
+
+    // The upper staff's barline spans both staves
+    auto endBarlineMask = [score](int measureIdx) {
+        const Measure* m = score->crMeasure(measureIdx);
+        const BarLine* barline = toBarLine(m->findSegment(SegmentType::EndBarLine, m->endTick())->element(0));
+        return barline->ldata()->mask();
+    };
+
+    // The numbers sit on the barlines after bars 3 and 6
+    EXPECT_FALSE(endBarlineMask(2).empty());
+    EXPECT_FALSE(endBarlineMask(5).empty());
+    EXPECT_TRUE(endBarlineMask(3).empty());
+    EXPECT_TRUE(endBarlineMask(4).empty());
+    EXPECT_TRUE(endBarlineMask(6).empty());
+
+    score->style().set(Sid::maskBarlinesForText, false);
+    score->doLayout();
+
+    EXPECT_TRUE(endBarlineMask(2).empty());
+    EXPECT_TRUE(endBarlineMask(5).empty());
 
     delete score;
 }

@@ -26,6 +26,7 @@
 
 namespace mu::engraving {
 class BarLine;
+class MeasureRepeat;
 class Page;
 class System;
 class StaffLines;
@@ -42,9 +43,11 @@ public:
 
 private:
     static void computeBarlineMasks(const Segment* barlineSement, const System* system, const std::vector<TextBase*>& allSystemText,
-                                    LayoutContext& ctx);
-    static void maskBarlineForText(BarLine* barline, const std::vector<TextBase*>& allSystemText);
+                                    const std::vector<MeasureRepeat*>& allSystemMeasureRepeats, LayoutContext& ctx);
+    static void maskBarlineForText(BarLine* barline, const std::vector<TextBase*>& allSystemText,
+                                   const std::vector<MeasureRepeat*>& allSystemMeasureRepeats);
     static std::vector<TextBase*> collectAllSystemText(const System* system);
+    static std::vector<MeasureRepeat*> collectAllSystemMeasureRepeats(const System* system);
 
     static void computeSlurTieMasks(SlurTieSegment* slurTieSegment);
 
